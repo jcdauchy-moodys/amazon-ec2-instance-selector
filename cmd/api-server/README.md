@@ -66,6 +66,7 @@ GET /api/v1/instances?vcpus=4&memory=8gb&cpu_architecture=x86_64
 - `bare_metal` - Bare metal instances (true/false)
 - `burstable` - Burstable instances (true/false)
 - `free_tier` - Free tier eligible (true/false)
+- `nvme` - NVME storage support (true/false)
 - `max_results` - Maximum number of results (default: 20)
 - `availability_zones` - Comma-separated list of AZs
 - `usage_class` - Usage class (on-demand, spot)
@@ -89,6 +90,7 @@ Content-Type: application/json
   "memory_per_cpu_max": 8.0,
   "cpu_architecture": "x86_64",
   "current_generation": true,
+  "nvme": true,
   "max_results": 10
 }
 ```
@@ -188,6 +190,26 @@ curl -X POST http://localhost:8080/api/v1/instances/filter \
   }'
 ```
 
+### Example 6: Find instances with NVME storage support
+
+```bash
+# Find instances that support NVME storage
+curl "http://localhost:8080/api/v1/instances?nvme=true&current_generation=true&max_results=5"
+```
+
+```bash
+# Find NVME instances with specific specs using POST
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nvme": true,
+    "vcpus_min": 4,
+    "memory_min": "16gb",
+    "current_generation": true,
+    "max_results": 10
+  }'
+```
+
 ## Response Format
 
 All successful responses follow this format:
@@ -238,6 +260,169 @@ curl "http://localhost:8080/api/v1/instances?memory_per_cpu_min=8.0"
 # Find balanced instances (good for web applications)
 curl "http://localhost:8080/api/v1/instances?memory_per_cpu_min=3.0&memory_per_cpu_max=5.0"
 ```
+
+## Instance Family/Model Filtering
+
+Filter by specific instance families or models using `allow_list` (regex patterns) or `instance_types` (exact matches).
+
+### Common Instance Families
+
+**Compute Optimized (C Family):**
+```bash
+# All current-gen C instances (c5, c5a, c5n, c6i, c6a, c7i, etc.)
+curl "http://localhost:8080/api/v1/instances?allow_list=c[5-7].*&current_generation=true"
+
+# Specific C5 instances only
+curl "http://localhost:8080/api/v1/instances?allow_list=c5\\..*"
+
+# C6i instances with NVME storage
+curl "http://localhost:8080/api/v1/instances?allow_list=c6i\\..*&nvme=true"
+```
+
+**Memory Optimized (R Family):**
+```bash
+# All R5 family instances (r5, r5a, r5ad, r5d, r5dn, r5n)
+curl "http://localhost:8080/api/v1/instances?allow_list=r5.*"
+
+# R5d instances only (with NVMe SSD storage)
+curl "http://localhost:8080/api/v1/instances?allow_list=r5d\\..*"
+
+# R6i instances with specific memory requirements
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allow_list": "r6i\\..*",
+    "memory_min": "32gb",
+    "current_generation": true
+  }'
+```
+
+**General Purpose (M Family):**
+```bash
+# All M5/M6 instances
+curl "http://localhost:8080/api/v1/instances?allow_list=m[56].*"
+
+# M6i instances with balanced specs
+curl "http://localhost:8080/api/v1/instances?allow_list=m6i\\..*&vcpus_min=4&vcpus_max=16"
+
+# M5dn instances (with local NVMe storage and enhanced networking)
+curl "http://localhost:8080/api/v1/instances?allow_list=m5dn\\..*"
+```
+
+**Storage Optimized (I Family):**
+```bash
+# All I3 instances with high IOPS
+curl "http://localhost:8080/api/v1/instances?allow_list=i3.*&nvme=true"
+
+# I4i instances (latest generation)
+curl "http://localhost:8080/api/v1/instances?allow_list=i4i\\..*"
+```
+
+**GPU Instances:**
+```bash
+# All P3/P4 instances (machine learning)
+curl "http://localhost:8080/api/v1/instances?allow_list=p[34].*"
+
+# G4 instances (graphics workloads)
+curl "http://localhost:8080/api/v1/instances?allow_list=g4.*"
+
+# G5 instances with specific GPU requirements
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allow_list": "g5\\..*",
+    "gpus_min": 1,
+    "current_generation": true
+  }'
+```
+
+### Size-Specific Filtering
+
+```bash
+# All large instances across families
+curl "http://localhost:8080/api/v1/instances?allow_list=.*\\.large"
+
+# All xlarge and 2xlarge instances
+curl "http://localhost:8080/api/v1/instances?allow_list=.*\\.(xl|2xl)arge"
+
+# Metal instances only
+curl "http://localhost:8080/api/v1/instances?allow_list=.*\\.metal"
+```
+
+### Practical Use Cases
+
+**High-Performance Computing:**
+```bash
+# C5n instances with enhanced networking
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allow_list": "c5n\\..*",
+    "network_performance": 25,
+    "current_generation": true
+  }'
+```
+
+**Database Workloads:**
+```bash
+# R5d or R6i instances with high memory and NVME
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allow_list": "r(5d|6i)\\..*",
+    "memory_min": "64gb",
+    "nvme": true,
+    "current_generation": true
+  }'
+```
+
+**Web Applications:**
+```bash
+# M5/M6 instances with balanced resources
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allow_list": "m[56].*",
+    "vcpus_min": 2,
+    "vcpus_max": 8,
+    "memory_per_cpu_min": 3.0,
+    "memory_per_cpu_max": 5.0,
+    "current_generation": true
+  }'
+```
+
+**Big Data/Analytics:**
+```bash
+# I3/I4 instances with high local storage
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allow_list": "i[34].*",
+    "instance_storage_min": "1tb",
+    "nvme": true
+  }'
+```
+
+### Exclude Specific Families
+
+```bash
+# All instances except T instances (exclude burstable)
+curl "http://localhost:8080/api/v1/instances?deny_list=t[234].*&current_generation=true"
+
+# Modern instances only (exclude older generations)
+curl "http://localhost:8080/api/v1/instances?deny_list=[acimr][1-4].*&current_generation=true"
+```
+
+### Regex Pattern Reference
+
+| Pattern | Matches | Example |
+|---------|---------|---------|
+| `r5d\\..*` | All r5d instances | r5d.large, r5d.xlarge |
+| `r5.*` | All r5 family | r5, r5a, r5ad, r5d, r5dn |
+| `[rm]5.*` | All r5 and m5 families | r5.large, m5.large |
+| `.*\\.large` | All large sizes | c5.large, m5.large |
+| `c[5-7].*` | C5, C6, C7 families | c5.large, c6i.large |
+| `.*\\.(xl\\|2xl)arge` | xlarge and 2xlarge | c5.xlarge, m5.2xlarge |
 
 ## Configuration
 

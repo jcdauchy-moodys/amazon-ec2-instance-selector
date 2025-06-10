@@ -80,6 +80,7 @@ type FilterRequest struct {
 	GPUsMax            *int32   `json:"gpus_max,omitempty"`
 	NetworkPerformance *int     `json:"network_performance,omitempty"`
 	FreeTier           *bool    `json:"free_tier,omitempty"`
+	NVME               *bool    `json:"nvme,omitempty"`
 }
 
 type APIResponse struct {
@@ -384,6 +385,12 @@ func (s *APIServer) parseQueryParams(r *http.Request) FilterRequest {
 		req.Region = &region
 	}
 
+	if nvme := r.URL.Query().Get("nvme"); nvme != "" {
+		if v, err := strconv.ParseBool(nvme); err == nil {
+			req.NVME = &v
+		}
+	}
+
 	return req
 }
 
@@ -482,6 +489,7 @@ func (s *APIServer) requestToFilters(req FilterRequest) (selector.Filters, error
 	filters.BareMetal = req.BareMetal
 	filters.Burstable = req.Burstable
 	filters.FreeTier = req.FreeTier
+	filters.NVME = req.NVME
 
 	// Availability zones
 	if len(req.AvailabilityZones) > 0 {

@@ -415,12 +415,16 @@ go build -o ec2-api-server cmd/api-server/main.go
 # Find memory-optimized instances (8+ GiB per vCPU)
 curl "http://localhost:8080/api/v1/instances?memory_per_cpu_min=8.0&current_generation=true&max_results=5"
 
+# Find instances with NVME storage support
+curl "http://localhost:8080/api/v1/instances?nvme=true&current_generation=true&max_results=5"
+
 # Find balanced instances with POST request
 curl -X POST http://localhost:8080/api/v1/instances/filter \
   -H "Content-Type: application/json" \
   -d '{
     "memory_per_cpu_min": 2.0,
     "memory_per_cpu_max": 4.0,
+    "nvme": true,
     "current_generation": true,
     "max_results": 5
   }'
