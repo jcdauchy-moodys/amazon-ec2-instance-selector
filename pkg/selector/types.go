@@ -43,7 +43,7 @@ func (fn InstanceTypesOutputFn) Output(instanceTypes []*instancetypes.Details) [
 type Selector struct {
 	EC2                   awsapi.SelectorInterface
 	EC2Pricing            ec2pricing.EC2PricingIface
-	InstanceTypesProvider instancetypes.ProviderInterface
+	InstanceTypesProvider *instancetypes.Provider
 	ServiceRegistry       ServiceRegistry
 	Logger                *log.Logger
 }

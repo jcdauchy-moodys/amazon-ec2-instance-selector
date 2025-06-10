@@ -126,7 +126,6 @@ const (
 	output        = "output"
 	cacheTTL      = "cache-ttl"
 	cacheDir      = "cache-dir"
-	dbDir         = "db-dir"
 	sortDirection = "sort-direction"
 	sortBy        = "sort-by"
 )
@@ -228,7 +227,6 @@ Full docs can be found at github.com/aws/amazon-` + binName
 	cli.ConfigStringFlag(output, cli.StringMe("o"), nil, fmt.Sprintf("Specify the output format (%s)", strings.Join(cliOutputTypes, ", ")), nil)
 	cli.ConfigIntFlag(cacheTTL, nil, env.WithDefaultInt("EC2_INSTANCE_SELECTOR_CACHE_TTL", 0), "Cache TTLs in hours for pricing and instance type caches. Setting the cache to 0 will turn off caching and cleanup any on-disk caches.")
 	cli.ConfigPathFlag(cacheDir, nil, env.WithDefaultString("EC2_INSTANCE_SELECTOR_CACHE_DIR", "~/.ec2-instance-selector/"), "Directory to save the pricing and instance type caches")
-	cli.ConfigPathFlag(dbDir, nil, nil, "Directory to store SQLite database for instance type caching (alternative to file-based cache)")
 	cli.ConfigBoolFlag(verbose, cli.StringMe("v"), nil, "Verbose - will print out full instance specs")
 	cli.ConfigBoolFlag("debug", nil, nil, "Debug - prints debug log messages")
 	cli.ConfigBoolFlag(help, cli.StringMe("h"), nil, "Help")
@@ -277,12 +275,7 @@ Full docs can be found at github.com/aws/amazon-` + binName
 	flags[region] = cfg.Region
 
 	cacheTTLDuration := time.Hour * time.Duration(*cli.IntMe(flags[cacheTTL]))
-	var dbDirPtr *string = cli.StringMe(flags[dbDir])
-	var dbDirStr string
-	if dbDirPtr != nil {
-		dbDirStr = *dbDirPtr
-	}
-	instanceSelector, err := selector.NewWithCacheAndDB(ctx, cfg, cacheTTLDuration, *cli.StringMe(flags[cacheDir]), dbDirStr)
+	instanceSelector, err := selector.NewWithCache(ctx, cfg, cacheTTLDuration, *cli.StringMe(flags[cacheDir]))
 	if err != nil {
 		fmt.Printf("An error occurred when initializing the ec2 selector: %v", err)
 		os.Exit(1)

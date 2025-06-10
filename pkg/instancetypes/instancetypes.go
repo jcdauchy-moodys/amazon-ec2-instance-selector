@@ -38,15 +38,6 @@ type Details struct {
 	SpotPrice            *float64
 }
 
-// ProviderInterface defines the interface that both file-based and database providers must implement
-type ProviderInterface interface {
-	Get(ctx context.Context, instanceTypes []ec2types.InstanceType) ([]*Details, error)
-	SetLogger(logger *log.Logger)
-	Save() error
-	Clear() error
-	CacheCount() int
-}
-
 type Provider struct {
 	Region          string
 	DirectoryPath   string
@@ -67,17 +58,6 @@ func NewProvider(region string, ec2Client ec2.DescribeInstanceTypesAPIClient) *P
 		cache:          cache.New(0, 0),
 		logger:         log.New(io.Discard, "", 0),
 	}
-}
-
-// LoadProviderFromOrNew creates either a file-based or database provider based on the parameters
-func LoadProviderFromOrNew(cacheDir string, dbDir string, region string, ttl time.Duration, ec2Client ec2.DescribeInstanceTypesAPIClient) (ProviderInterface, error) {
-	// If both directories are provided, prefer database
-	if dbDir != "" {
-		return NewDatabaseProvider(dbDir, region, ttl, ec2Client)
-	}
-
-	// Fall back to file-based provider
-	return LoadFromOrNew(cacheDir, region, ttl, ec2Client)
 }
 
 // NewProvider creates a new Instance Types provider used to fetch Instance Type information from EC2 and optionally cache.

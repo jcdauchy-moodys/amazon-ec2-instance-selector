@@ -105,8 +105,8 @@ func New(ctx context.Context, cfg aws.Config) (*Selector, error) {
 	return NewWithCache(ctx, cfg, 0, "")
 }
 
-// NewWithCacheAndDB creates an instance of Selector with either file-based cache or database cache
-func NewWithCacheAndDB(ctx context.Context, cfg aws.Config, ttl time.Duration, cacheDir string, dbDir string) (*Selector, error) {
+// NewWithCache creates an instance of Selector backed by an on-disk cache provided an aws session and cache configuration parameters.
+func NewWithCache(ctx context.Context, cfg aws.Config, ttl time.Duration, cacheDir string) (*Selector, error) {
 	serviceRegistry := NewRegistry()
 	serviceRegistry.RegisterAWSServices()
 	ec2Client := ec2.NewFromConfig(cfg, func(options *ec2.Options) {
@@ -117,7 +117,7 @@ func NewWithCacheAndDB(ctx context.Context, cfg aws.Config, ttl time.Duration, c
 		return nil, err
 	}
 
-	instanceTypeProvider, err := instancetypes.LoadProviderFromOrNew(cacheDir, dbDir, cfg.Region, ttl, ec2Client)
+	instanceTypeProvider, err := instancetypes.LoadFromOrNew(cacheDir, cfg.Region, ttl, ec2Client)
 	if err != nil {
 		return nil, fmt.Errorf("unable to initialize instance type provider: %w", err)
 	}
@@ -129,11 +129,6 @@ func NewWithCacheAndDB(ctx context.Context, cfg aws.Config, ttl time.Duration, c
 		ServiceRegistry:       serviceRegistry,
 		Logger:                log.New(io.Discard, "", 0),
 	}, nil
-}
-
-// NewWithCache creates an instance of Selector backed by an on-disk cache provided an aws session and cache configuration parameters.
-func NewWithCache(ctx context.Context, cfg aws.Config, ttl time.Duration, cacheDir string) (*Selector, error) {
-	return NewWithCacheAndDB(ctx, cfg, ttl, cacheDir, "")
 }
 
 // SetLogger can be called to log more detailed logs about what selector is doing
