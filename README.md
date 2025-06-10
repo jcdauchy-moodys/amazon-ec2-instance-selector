@@ -1,4 +1,4 @@
-<h1>Amazon EC2 Instance Selector Custom</h1>
+<h1>Amazon EC2 Instance Selector</h1>
 
 <h4>A CLI tool and go library which recommends instance types based on resource criteria like vcpus and memory.</h4>
 
