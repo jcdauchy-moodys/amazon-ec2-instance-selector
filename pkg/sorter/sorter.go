@@ -19,9 +19,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/oliveagle/jsonpath"
-
 	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/instancetypes"
+	"github.com/oliveagle/jsonpath"
 )
 
 const (
@@ -42,6 +41,7 @@ const (
 
 	VCPUs                          = "vcpus"
 	Memory                         = "memory"
+	MemoryPerCPU                   = "memory-per-cpu"
 	GPUMemoryTotal                 = "gpu-memory-total"
 	NetworkInterfaces              = "network-interfaces"
 	SpotPrice                      = "spot-price"
@@ -162,7 +162,7 @@ func newSorter(instanceTypes []*instancetypes.Details, sortField string, sortDir
 // matches one of the special flags.
 func formatSortField(sortField string) string {
 	// check to see if the sorting field matched one of the special exceptions
-	if sortField == GPUCountField || sortField == InferenceAcceleratorsField {
+	if sortField == GPUCountField || sortField == InferenceAcceleratorsField || sortField == MemoryPerCPU {
 		return sortField
 	}
 
@@ -187,6 +187,20 @@ func newSorterNode(instanceType *instancetypes.Details, sortField string) (*sort
 			instanceType: instanceType,
 			fieldValue:   reflect.ValueOf(acceleratorsCount),
 		}, nil
+	case "memory-per-cpu":
+		if instanceType.VCpuInfo.DefaultVCpus != nil && *instanceType.VCpuInfo.DefaultVCpus != 0 && instanceType.MemoryInfo.SizeInMiB != nil {
+			memoryGiB := float64(*instanceType.MemoryInfo.SizeInMiB) / 1024.0
+			memoryPerCpu := memoryGiB / float64(*instanceType.VCpuInfo.DefaultVCpus)
+			return &sorterNode{
+				instanceType: instanceType,
+				fieldValue:   reflect.ValueOf(memoryPerCpu),
+			}, nil
+		} else {
+			return &sorterNode{
+				instanceType: instanceType,
+				fieldValue:   reflect.ValueOf(0.0),
+			}, nil
+		}
 	}
 
 	// convert instance type into json
