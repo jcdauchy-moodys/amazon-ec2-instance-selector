@@ -70,6 +70,7 @@ const (
 	enaSupport                       = "enaSupport"
 	efaSupport                       = "efaSupport"
 	vcpusToMemoryRatio               = "vcpusToMemoryRatio"
+	memoryPerCpu                     = "memoryPerCpu"
 	currentGeneration                = "currentGeneration"
 	networkInterfaces                = "networkInterfaces"
 	networkPerformance               = "networkPerformance"
@@ -335,6 +336,7 @@ func (s Selector) prepareFilter(ctx context.Context, filters Filters, instanceTy
 		enaSupport:                       {filters.EnaSupport, supportSyntaxToBool(&eneaSupport)},
 		efaSupport:                       {filters.EfaSupport, instanceTypeInfo.NetworkInfo.EfaSupported},
 		vcpusToMemoryRatio:               {filters.VCpusToMemoryRatio, calculateVCpusToMemoryRatio(instanceTypeInfo.VCpuInfo.DefaultVCpus, instanceTypeInfo.MemoryInfo.SizeInMiB)},
+		memoryPerCpu:                     {filters.MemoryPerCpuRange, calculateMemoryPerCpu(instanceTypeInfo.VCpuInfo.DefaultVCpus, instanceTypeInfo.MemoryInfo.SizeInMiB)},
 		currentGeneration:                {filters.CurrentGeneration, instanceTypeInfo.CurrentGeneration},
 		networkInterfaces:                {filters.NetworkInterfaces, instanceTypeInfo.NetworkInfo.MaximumNetworkInterfaces},
 		networkPerformance:               {filters.NetworkPerformance, getNetworkPerformance(instanceTypeInfo.NetworkInfo.NetworkPerformance)},

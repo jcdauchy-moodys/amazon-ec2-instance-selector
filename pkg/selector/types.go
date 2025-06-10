@@ -220,6 +220,10 @@ type Filters struct {
 	// VcpusToMemoryRatio is a ratio of vcpus to memory expressed as a floating point
 	VCpusToMemoryRatio *float64
 
+	// MemoryPerCpuRange is a range filter for memory (in GiB) per vCPU ratio
+	// Example: if an instance has 8 GiB memory and 2 vCPUs, the ratio is 4.0 GiB per vCPU
+	MemoryPerCpuRange *Float64RangeFilter
+
 	// AllowList is a regex of allowed instance types
 	AllowList *regexp.Regexp
 

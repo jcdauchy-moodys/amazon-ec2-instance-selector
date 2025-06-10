@@ -125,6 +125,22 @@ m5dn.metal
 NOTE: 22 entries were truncated, increase --max-results to see more
 ```
 
+**Find instance types with memory-per-CPU ratio between 2-4 GiB per vCPU**
+```
+$ ec2-instance-selector --memory-per-cpu-min 2 --memory-per-cpu-max 4 --max-results 10 -r us-east-1
+c5.large
+c5.xlarge
+c5.2xlarge
+c5.4xlarge
+c5.9xlarge
+c5.12xlarge
+c5.18xlarge
+c5.24xlarge
+c5.metal
+c5a.large
+NOTE: 10 entries were truncated, increase --max-results to see more
+```
+
 **Short Table Output**
 ```
 $ ec2-instance-selector --memory 4 --vcpus 2 --cpu-architecture x86_64 -r us-east-1 -o table
@@ -444,6 +460,9 @@ Filter Flags:
   -m, --memory string                                  Amount of Memory available (Example: 4 GiB) (sets --memory-min and -max to the same value)
       --memory-max string                              Maximum Amount of Memory available (Example: 4 GiB) If --memory-min is not specified, the lower bound will be 0
       --memory-min string                              Minimum Amount of Memory available (Example: 4 GiB) If --memory-max is not specified, the upper bound will be infinity
+      --memory-per-cpu float                           The amount of memory per CPU (Example: 4 GiB) (sets --memory-per-cpu-min and -max to the same value)
+      --memory-per-cpu-max float                       Maximum The amount of memory per CPU (Example: 4 GiB) If --memory-per-cpu-min is not specified, the lower bound will be 0
+      --memory-per-cpu-min float                       Minimum The amount of memory per CPU (Example: 4 GiB) If --memory-per-cpu-max is not specified, the upper bound will be infinity
       --network-encryption                             Instance Types that support automatic network encryption in-transit
       --network-interfaces int32                       Number of network interfaces (ENIs) that can be attached to the instance (sets --network-interfaces-min and -max to the same value)
       --network-interfaces-max int32                   Maximum Number of network interfaces (ENIs) that can be attached to the instance If --network-interfaces-min is not specified, the lower bound will be 0

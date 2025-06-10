@@ -62,6 +62,7 @@ const (
 	vcpus                            = "vcpus"
 	memory                           = "memory"
 	vcpusToMemoryRatio               = "vcpus-to-memory-ratio"
+	memoryPerCpu                     = "memory-per-cpu"
 	cpuArchitecture                  = "cpu-architecture"
 	cpuManufacturer                  = "cpu-manufacturer"
 	gpus                             = "gpus"
@@ -168,6 +169,7 @@ Full docs can be found at github.com/aws/amazon-` + binName
 	cli.Int32MinMaxRangeFlags(vcpus, cli.StringMe("c"), nil, "Number of vcpus available to the instance type.")
 	cli.ByteQuantityMinMaxRangeFlags(memory, cli.StringMe("m"), nil, "Amount of Memory available (Example: 4 GiB)")
 	cli.RatioFlag(vcpusToMemoryRatio, nil, nil, "The ratio of vcpus to GiBs of memory. (Example: 1:2)")
+	cli.Float64MinMaxRangeFlags(memoryPerCpu, nil, nil, "The amount of memory per CPU (Example: 4 GiB)")
 	cli.StringOptionsFlag(cpuArchitecture, cli.StringMe("a"), nil, "CPU architecture [x86_64, amd64, x86_64_mac, i386, arm64, or arm64_mac]", []string{"x86_64", "x86_64_mac", "amd64", "i386", "arm64", "arm64_mac"})
 	cli.StringOptionsFlag(cpuManufacturer, nil, nil, "CPU manufacturer [amd, intel, aws, apple]", []string{"amd", "intel", "aws", "apple"})
 	cli.Int32MinMaxRangeFlags(gpus, cli.StringMe("g"), nil, "Total Number of GPUs (Example: 4)")
@@ -381,6 +383,7 @@ Full docs can be found at github.com/aws/amazon-` + binName
 		VCpusRange:                       cli.Int32RangeMe(flags[vcpus]),
 		MemoryRange:                      cli.ByteQuantityRangeMe(flags[memory]),
 		VCpusToMemoryRatio:               cli.Float64Me(flags[vcpusToMemoryRatio]),
+		MemoryPerCpuRange:                cli.Float64RangeMe(flags[memoryPerCpu]),
 		CPUArchitecture:                  cpuArchitectureFilterValue,
 		CPUManufacturer:                  cpuManufacturerFilterValue,
 		GpusRange:                        cli.Int32RangeMe(flags[gpus]),

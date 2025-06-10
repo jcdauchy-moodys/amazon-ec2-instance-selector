@@ -412,6 +412,18 @@ func calculateVCpusToMemoryRatio(vcpusVal *int32, memoryVal *int64) *float64 {
 	return &result
 }
 
+// calculateMemoryPerCpu calculates the ratio of memory (in GiB) per vCPU
+// Returns the memory in GiB divided by the number of vCPUs
+func calculateMemoryPerCpu(vcpusVal *int32, memoryVal *int64) *float64 {
+	if vcpusVal == nil || *vcpusVal == 0 || memoryVal == nil {
+		return nil
+	}
+	// Convert memory from MiB to GiB and calculate ratio
+	memoryGiB := float64(*memoryVal) / 1024.0
+	ratio := memoryGiB / float64(*vcpusVal)
+	return &ratio
+}
+
 // Slice helper function
 
 func contains(slice []*string, target string) bool {

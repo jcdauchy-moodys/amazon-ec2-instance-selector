@@ -34,6 +34,7 @@ type wideColumnsData struct {
 	instanceName       string `column:"Instance Type"`
 	vcpu               int32  `column:"VCPUs"`
 	memory             string `column:"Mem (GiB)"`
+	memoryPerCpu       string `column:"Mem Per CPU (GiB)"`
 	hypervisor         string `column:"Hypervisor"`
 	currentGen         bool   `column:"Current Gen"`
 	hibernationSupport bool   `column:"Hibernation Support"`
@@ -135,10 +136,11 @@ func TableOutputWide(instanceTypeInfoSlice []*instancetypes.Details) []string {
 	columnsData := getWideColumnsData(instanceTypeInfoSlice)
 
 	for _, data := range columnsData {
-		fmt.Fprintf(w, "\n%s\t%d\t%s\t%s\t%t\t%t\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t",
+		fmt.Fprintf(w, "\n%s\t%d\t%s\t%s\t%s\t%t\t%t\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t",
 			data.instanceName,
 			data.vcpu,
 			data.memory,
+			data.memoryPerCpu,
 			data.hypervisor,
 			data.currentGen,
 			data.hibernationSupport,
@@ -233,6 +235,7 @@ func getWideColumnsData(instanceTypes []*instancetypes.Details) []*wideColumnsDa
 			instanceName:       string(instanceType.InstanceType),
 			vcpu:               *instanceType.VCpuInfo.DefaultVCpus,
 			memory:             formatFloat(float64(*instanceType.MemoryInfo.SizeInMiB) / 1024.0),
+			memoryPerCpu:       formatFloat(float64(*instanceType.MemoryInfo.SizeInMiB) / float64(*instanceType.VCpuInfo.DefaultVCpus) / 1024.0),
 			hypervisor:         string(instanceType.Hypervisor),
 			currentGen:         *instanceType.CurrentGeneration,
 			hibernationSupport: *instanceType.HibernationSupported,
