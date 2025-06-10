@@ -56,6 +56,8 @@ GET /api/v1/instances?vcpus=4&memory=8gb&cpu_architecture=x86_64
 - `memory` - Memory amount (e.g., "4gb", "8 GiB")
 - `memory_min` - Minimum memory
 - `memory_max` - Maximum memory
+- `memory_per_cpu_min` - Minimum memory per vCPU ratio (GiB per vCPU)
+- `memory_per_cpu_max` - Maximum memory per vCPU ratio (GiB per vCPU)
 - `cpu_architecture` - CPU architecture (x86_64, arm64)
 - `instance_types` - Comma-separated list of instance types
 - `allow_list` - Regex pattern for allowed instance types
@@ -83,6 +85,8 @@ Content-Type: application/json
 {
   "vcpus": 4,
   "memory": "8gb",
+  "memory_per_cpu_min": 2.0,
+  "memory_per_cpu_max": 8.0,
   "cpu_architecture": "x86_64",
   "current_generation": true,
   "max_results": 10
@@ -165,6 +169,25 @@ curl -X POST http://localhost:8080/api/v1/instances/filter \
   }'
 ```
 
+### Example 5: Find memory-optimized instances by memory-per-CPU ratio
+
+```bash
+# Find instances with at least 4 GiB of memory per vCPU
+curl "http://localhost:8080/api/v1/instances?memory_per_cpu_min=4.0&current_generation=true"
+```
+
+```bash
+# Find instances with balanced memory (2-4 GiB per vCPU)
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "memory_per_cpu_min": 2.0,
+    "memory_per_cpu_max": 4.0,
+    "current_generation": true,
+    "max_results": 10
+  }'
+```
+
 ## Response Format
 
 All successful responses follow this format:
@@ -195,7 +218,30 @@ Memory values can be specified in several formats:
 - `"1024mb"` or `"1024 MB"`
 - `"2tb"` or `"2 TB"`
 
+## Memory-per-CPU Filtering
+
+The `memory_per_cpu_min` and `memory_per_cpu_max` parameters allow you to filter instances based on their memory-to-vCPU ratio (GiB of memory per vCPU).
+
+**Examples:**
+- **Compute-optimized** instances typically have `1-2 GiB per vCPU`
+- **General-purpose** instances typically have `3-4 GiB per vCPU`  
+- **Memory-optimized** instances typically have `8+ GiB per vCPU`
+
+**Use Cases:**
+```bash
+# Find compute-optimized instances (good for CPU-intensive workloads)
+curl "http://localhost:8080/api/v1/instances?memory_per_cpu_max=2.0"
+
+# Find memory-optimized instances (good for in-memory databases)
+curl "http://localhost:8080/api/v1/instances?memory_per_cpu_min=8.0"
+
+# Find balanced instances (good for web applications)
+curl "http://localhost:8080/api/v1/instances?memory_per_cpu_min=3.0&memory_per_cpu_max=5.0"
+```
+
 ## Configuration
+
+### AWS Credentials
 
 The server uses AWS SDK default configuration for credentials:
 1. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
@@ -206,6 +252,54 @@ You can also set the AWS region:
 ```bash
 export AWS_REGION=us-west-2
 ```
+
+### Server Configuration
+
+The API server can be configured using environment variables:
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `PORT` | `8080` | Server port |
+| `EC2_INSTANCE_SELECTOR_CACHE_TTL` | `24h` | Cache time-to-live for pricing data. Examples: `1h`, `30m`, `24h`, `0` (disables cache) |
+| `EC2_INSTANCE_SELECTOR_CACHE_DIR` | `~/.ec2-instance-selector/` | Directory for cache files |
+| `EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT` | `false` | Skip pricing cache initialization on startup for faster startup |
+
+### Pricing Data Configuration
+
+**Default Behavior (Recommended):**
+```bash
+# Uses 24-hour cache, initializes pricing on startup
+./ec2-api-server
+```
+
+**Custom Cache Configuration:**
+```bash
+export EC2_INSTANCE_SELECTOR_CACHE_TTL=12h
+export EC2_INSTANCE_SELECTOR_CACHE_DIR=/tmp/ec2-cache/
+export PORT=3000
+./ec2-api-server
+```
+
+**Fast Startup (No Pricing Data):**
+```bash
+# Starts quickly but OndemandPricePerHour and SpotPrice will be null
+export EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT=true
+./ec2-api-server
+```
+
+**Disable Pricing Cache:**
+```bash
+# No pricing data cached or returned
+export EC2_INSTANCE_SELECTOR_CACHE_TTL=0
+./ec2-api-server
+```
+
+### Understanding Pricing Data
+
+- **First startup** with pricing enabled takes 30-60 seconds to fetch pricing data from AWS
+- **Subsequent startups** are fast since pricing data is cached
+- **OndemandPricePerHour** and **SpotPrice** fields will only be populated when pricing cache is enabled and initialized
+- **Spot prices** are 30-day averages across availability zones
 
 ## Building
 
@@ -238,7 +332,11 @@ CMD ["./ec2-api-server"]
 Build and run:
 ```bash
 docker build -t ec2-instance-selector-api .
-docker run -p 8080:8080 -e AWS_ACCESS_KEY_ID=xxx -e AWS_SECRET_ACCESS_KEY=yyy ec2-instance-selector-api
+docker run -p 8080:8080 \
+  -e AWS_ACCESS_KEY_ID=xxx \
+  -e AWS_SECRET_ACCESS_KEY=yyy \
+  -e EC2_INSTANCE_SELECTOR_CACHE_TTL=12h \
+  ec2-instance-selector-api
 ```
 
 ## Integration
@@ -251,4 +349,4 @@ This API can be easily integrated into:
 - Cost optimization tools
 - Instance recommendation systems
 
-The JSON responses contain all the detailed instance information including pricing, specifications, and capabilities, making it perfect for building instance selection UIs or automated infrastructure provisioning tools. 
+The JSON responses contain all the detailed instance information including pricing, specifications, and capabilities, making it perfect for building instance selection UIs or automated infrastructure provisioning tools.

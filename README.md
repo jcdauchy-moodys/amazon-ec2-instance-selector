@@ -37,6 +37,7 @@ Instance Selector can also be consumed as a go library for direct integration in
 - Aggregate filters allow for more opinionated instance selections like `--base-instance-type` and `--flexible`
 - Consumable as a go library or CLI
 - Interactive TUI w/ `--output interactive`
+- REST API server for integration into web applications and automation tools
 
 ## Installation and Configuration
 
@@ -395,197 +396,58 @@ NOTE: Use this JSON format as reference when finding JSON paths for sorting
 $ ec2-instance-selector --help
 ```
 
-```bash#help
-ec2-instance-selector is a CLI tool to filter EC2 instance types based on resource criteria.
-Filtering allows you to select all the instance types that match your application requirements.
-Full docs can be found at github.com/aws/amazon-ec2-instance-selector
+### REST API
 
-Usage:
-  ec2-instance-selector [flags]
+The EC2 Instance Selector also provides a REST API server for integration into web applications and automation tools.
 
-Examples:
-ec2-instance-selector --vcpus 4 --region us-east-2 --availability-zones us-east-2b
-ec2-instance-selector --memory-min 4 --memory-max 8 --vcpus-min 4 --vcpus-max 8 --region us-east-2
+**Start the API server:**
+```bash
+# Build and run the API server
+go run cmd/api-server/main.go
 
-Filter Flags:
-      --allow-list string                              List of allowed instance types to select from w/ regex syntax (Example: m[3-5]\.*)
-      --auto-recovery                                  EC2 Auto-Recovery supported
-  -z, --availability-zones strings                     Availability zones or zone ids to check EC2 capacity offered in specific AZs
-      --baremetal                                      Bare Metal instance types (.metal instances)
-  -b, --burst-support                                  Burstable instance types
-  -a, --cpu-architecture string                        CPU architecture [x86_64, amd64, x86_64_mac, i386, arm64, or arm64_mac]
-      --cpu-manufacturer string                        CPU manufacturer [amd, intel, aws, apple]
-      --current-generation                             Current generation instance types (explicitly set this to false to not return current generation instance types)
-      --dedicated-hosts                                Dedicated Hosts supported
-      --deny-list string                               List of instance types which should be excluded w/ regex syntax (Example: m[1-2]\.*)
-      --disk-encryption                                EBS or local instance storage where encryption is supported or required
-      --disk-type string                               Disk Type: [hdd or ssd]
-      --ebs-optimized                                  EBS Optimized is supported or default
-      --ebs-optimized-baseline-bandwidth string        EBS Optimized baseline bandwidth (Example: 4 GiB) (sets --ebs-optimized-baseline-bandwidth-min and -max to the same value)
-      --ebs-optimized-baseline-bandwidth-max string    Maximum EBS Optimized baseline bandwidth (Example: 4 GiB) If --ebs-optimized-baseline-bandwidth-min is not specified, the lower bound will be 0
-      --ebs-optimized-baseline-bandwidth-min string    Minimum EBS Optimized baseline bandwidth (Example: 4 GiB) If --ebs-optimized-baseline-bandwidth-max is not specified, the upper bound will be infinity
-      --ebs-optimized-baseline-iops int                EBS Optimized baseline IOPS per second (Example: 10000) (sets --ebs-optimized-baseline-iops-min and -max to the same value)
-      --ebs-optimized-baseline-iops-max int            Maximum EBS Optimized baseline IOPS per second (Example: 10000) If --ebs-optimized-baseline-iops-min is not specified, the lower bound will be 0
-      --ebs-optimized-baseline-iops-min int            Minimum EBS Optimized baseline IOPS per second (Example: 10000) If --ebs-optimized-baseline-iops-max is not specified, the upper bound will be infinity
-      --ebs-optimized-baseline-throughput string       EBS Optimized baseline throughput per second (Example: 4 GiB) (sets --ebs-optimized-baseline-throughput-min and -max to the same value)
-      --ebs-optimized-baseline-throughput-max string   Maximum EBS Optimized baseline throughput per second (Example: 4 GiB) If --ebs-optimized-baseline-throughput-min is not specified, the lower bound will be 0
-      --ebs-optimized-baseline-throughput-min string   Minimum EBS Optimized baseline throughput per second (Example: 4 GiB) If --ebs-optimized-baseline-throughput-max is not specified, the upper bound will be infinity
-      --efa-support                                    Instance types that support Elastic Fabric Adapters (EFA)
-  -e, --ena-support                                    Instance types where ENA is supported or required
-  -f, --fpga-support                                   FPGA instance types
-      --free-tier                                      Free Tier supported
-      --generation int                                 Generation of the instance type (i.e. c7i.xlarge is 7) (sets --generation-min and -max to the same value)
-      --generation-max int                             Maximum Generation of the instance type (i.e. c7i.xlarge is 7) If --generation-min is not specified, the lower bound will be 0
-      --generation-min int                             Minimum Generation of the instance type (i.e. c7i.xlarge is 7) If --generation-max is not specified, the upper bound will be infinity
-      --gpu-manufacturer string                        GPU Manufacturer name (Example: NVIDIA)
-      --gpu-memory-total string                        Number of GPUs' total memory (Example: 4 GiB) (sets --gpu-memory-total-min and -max to the same value)
-      --gpu-memory-total-max string                    Maximum Number of GPUs' total memory (Example: 4 GiB) If --gpu-memory-total-min is not specified, the lower bound will be 0
-      --gpu-memory-total-min string                    Minimum Number of GPUs' total memory (Example: 4 GiB) If --gpu-memory-total-max is not specified, the upper bound will be infinity
-      --gpu-model string                               GPU Model name (Example: K520)
-  -g, --gpus int32                                     Total Number of GPUs (Example: 4) (sets --gpus-min and -max to the same value)
-      --gpus-max int32                                 Maximum Total Number of GPUs (Example: 4) If --gpus-min is not specified, the lower bound will be 0
-      --gpus-min int32                                 Minimum Total Number of GPUs (Example: 4) If --gpus-max is not specified, the upper bound will be infinity
-      --hibernation-support                            Hibernation supported
-      --hypervisor string                              Hypervisor: [xen or nitro]
-      --inference-accelerator-manufacturer string      Inference Accelerator Manufacturer name (Example: AWS)
-      --inference-accelerator-model string             Inference Accelerator Model name (Example: Inferentia)
-      --inference-accelerators int                     Total Number of inference accelerators (Example: 4) (sets --inference-accelerators-min and -max to the same value)
-      --inference-accelerators-max int                 Maximum Total Number of inference accelerators (Example: 4) If --inference-accelerators-min is not specified, the lower bound will be 0
-      --inference-accelerators-min int                 Minimum Total Number of inference accelerators (Example: 4) If --inference-accelerators-max is not specified, the upper bound will be infinity
-      --instance-storage string                        Amount of local instance storage (Example: 4 GiB) (sets --instance-storage-min and -max to the same value)
-      --instance-storage-max string                    Maximum Amount of local instance storage (Example: 4 GiB) If --instance-storage-min is not specified, the lower bound will be 0
-      --instance-storage-min string                    Minimum Amount of local instance storage (Example: 4 GiB) If --instance-storage-max is not specified, the upper bound will be infinity
-      --instance-types strings                         Instance Type names (must be exact, use allow-list for regex)
-      --ipv6                                           Instance Types that support IPv6
-  -m, --memory string                                  Amount of Memory available (Example: 4 GiB) (sets --memory-min and -max to the same value)
-      --memory-max string                              Maximum Amount of Memory available (Example: 4 GiB) If --memory-min is not specified, the lower bound will be 0
-      --memory-min string                              Minimum Amount of Memory available (Example: 4 GiB) If --memory-max is not specified, the upper bound will be infinity
-      --memory-per-cpu float                           The amount of memory per CPU (Example: 4 GiB) (sets --memory-per-cpu-min and -max to the same value)
-      --memory-per-cpu-max float                       Maximum The amount of memory per CPU (Example: 4 GiB) If --memory-per-cpu-min is not specified, the lower bound will be 0
-      --memory-per-cpu-min float                       Minimum The amount of memory per CPU (Example: 4 GiB) If --memory-per-cpu-max is not specified, the upper bound will be infinity
-      --network-encryption                             Instance Types that support automatic network encryption in-transit
-      --network-interfaces int32                       Number of network interfaces (ENIs) that can be attached to the instance (sets --network-interfaces-min and -max to the same value)
-      --network-interfaces-max int32                   Maximum Number of network interfaces (ENIs) that can be attached to the instance If --network-interfaces-min is not specified, the lower bound will be 0
-      --network-interfaces-min int32                   Minimum Number of network interfaces (ENIs) that can be attached to the instance If --network-interfaces-max is not specified, the upper bound will be infinity
-      --network-performance int                        Bandwidth in Gib/s of network performance (Example: 100) (sets --network-performance-min and -max to the same value)
-      --network-performance-max int                    Maximum Bandwidth in Gib/s of network performance (Example: 100) If --network-performance-min is not specified, the lower bound will be 0
-      --network-performance-min int                    Minimum Bandwidth in Gib/s of network performance (Example: 100) If --network-performance-max is not specified, the upper bound will be infinity
-      --nvme                                           EBS or local instance storage where NVME is supported or required
-      --placement-group-strategy string                Placement group strategy: [cluster, partition, spread]
-      --price-per-hour float                           Price/hour in USD (Example: 0.09) (sets --price-per-hour-min and -max to the same value)
-      --price-per-hour-max float                       Maximum Price/hour in USD (Example: 0.09) If --price-per-hour-min is not specified, the lower bound will be 0
-      --price-per-hour-min float                       Minimum Price/hour in USD (Example: 0.09) If --price-per-hour-max is not specified, the upper bound will be infinity
-      --root-device-type string                        Supported root device types: [ebs or instance-store]
-  -u, --usage-class string                             Usage class: [spot or on-demand]
-  -c, --vcpus int32                                    Number of vcpus available to the instance type. (sets --vcpus-min and -max to the same value)
-      --vcpus-max int32                                Maximum Number of vcpus available to the instance type. If --vcpus-min is not specified, the lower bound will be 0
-      --vcpus-min int32                                Minimum Number of vcpus available to the instance type. If --vcpus-max is not specified, the upper bound will be infinity
-      --vcpus-to-memory-ratio string                   The ratio of vcpus to GiBs of memory. (Example: 1:2)
-      --virtualization-type string                     Virtualization Type supported: [hvm or pv]
-
-
-Suite Flags:
-      --base-instance-type string   Instance Type used to retrieve similarly spec'd instance types
-      --flexible                    Retrieves a group of instance types spanning multiple generations based on opinionated defaults and user overridden resource filters
-      --service string              Filter instance types based on service support (Example: emr-5.20.0)
-
-
-Global Flags:
-      --cache-dir string        Directory to save the pricing and instance type caches (default "~/.ec2-instance-selector/")
-      --cache-ttl int           Cache TTLs in hours for pricing and instance type caches. Setting the cache to 0 will turn off caching and cleanup any on-disk caches.
-      --debug                   Debug - prints debug log messages
-  -h, --help                    Help
-      --max-results int         The maximum number of instance types that match your criteria to return (default 20)
-  -o, --output string           Specify the output format (table, table-wide, one-line, interactive)
-      --profile string          AWS CLI profile to use for credentials and config
-  -r, --region string           AWS Region to use for API requests (NOTE: if not passed in, uses AWS SDK default precedence)
-      --sort-by string          Specify the field to sort by. Quantity flags present in this CLI (memory, gpus, etc.) or a JSON path to the appropriate instance type field (Ex: ".MemoryInfo.SizeInMiB") is acceptable. (default ".InstanceType")
-      --sort-direction string   Specify the direction to sort in (ascending, asc, descending, desc) (default "ascending")
-  -v, --verbose                 Verbose - will print out full instance specs
-      --version                 Prints CLI version
+# Or build a binary
+go build -o ec2-api-server cmd/api-server/main.go
+./ec2-api-server
 ```
 
+**Find instances with memory-per-CPU filtering:**
+```bash
+# Find memory-optimized instances (8+ GiB per vCPU)
+curl "http://localhost:8080/api/v1/instances?memory_per_cpu_min=8.0&current_generation=true&max_results=5"
 
-### Go Library
+# Find balanced instances with POST request
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "memory_per_cpu_min": 2.0,
+    "memory_per_cpu_max": 4.0,
+    "current_generation": true,
+    "max_results": 5
+  }'
+```
 
-This is a minimal example of using the instance selector go package directly:
-
-**cmd/examples/example1.go**
-```go#cmd/examples/example1.go
-package main
-
-import (
-	"context"
-	"fmt"
-
-	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/bytequantity"
-	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/selector"
-	"github.com/aws/aws-sdk-go-v2/config"
-	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
-)
-
-func main() {
-	// Initialize a context for the application
-	ctx := context.Background()
-
-	// Load an AWS session by looking at shared credentials or environment variables
-	// https://aws.github.io/aws-sdk-go-v2/docs/configuring-sdk
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-2"))
-	if err != nil {
-		fmt.Printf("Oh no, AWS session credentials cannot be found: %v", err)
-		return
-	}
-
-	// Instantiate a new instance of a selector with the AWS session
-	instanceSelector, err := selector.New(ctx, cfg)
-	if err != nil {
-		fmt.Printf("Oh no, there was an error :( %v", err)
-		return
-	}
-
-	// Instantiate an int range filter to specify min and max vcpus
-	vcpusRange := selector.Int32RangeFilter{
-		LowerBound: 2,
-		UpperBound: 4,
-	}
-	// Instantiate a byte quantity range filter to specify min and max memory in GiB
-	memoryRange := selector.ByteQuantityRangeFilter{
-		LowerBound: bytequantity.FromGiB(2),
-		UpperBound: bytequantity.FromGiB(4),
-	}
-	// Create a variable for the CPU Architecture so that it can be passed as a pointer
-	// when creating the Filter struct
-	cpuArch := ec2types.ArchitectureTypeX8664
-
-	// Create a Filter struct with criteria you would like to filter
-	// The full struct definition can be found here for all of the supported filters:
-	// https://github.com/aws/amazon-ec2-instance-selector/blob/main/pkg/selector/types.go
-	filters := selector.Filters{
-		VCpusRange:      &vcpusRange,
-		MemoryRange:     &memoryRange,
-		CPUArchitecture: &cpuArch,
-	}
-
-	// Pass the Filter struct to the Filter function of your selector instance
-	instanceTypesSlice, err := instanceSelector.Filter(ctx, filters)
-	if err != nil {
-		fmt.Printf("Oh no, there was an error :( %v", err)
-		return
-	}
-	// Print the returned instance types slice
-	fmt.Println(instanceTypesSlice)
+**Sample JSON Response:**
+```json
+{
+  "success": true,
+  "instance_types": [
+    {
+      "InstanceType": "r5.large",
+      "VCpuInfo": {
+        "DefaultVCpus": 2
+      },
+      "MemoryInfo": {
+        "SizeInMiB": 16384
+      },
+      "OndemandPricePerHour": 0.126,
+      "SpotPrice": 0.045
+    }
+  ],
+  "count": 1
 }
 ```
 
-**Execute the example:**
-
-*NOTE: Make sure you have [AWS credentials](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html#cli-configure-files-settings) setup*
-```bash#cmd/examples/example1.go
-$ git clone https://github.com/aws/amazon-ec2-instance-selector.git
-$ cd amazon-ec2-instance-selector/
-$ go run cmd/examples/example1.go
-[c4.large c5.large c5a.large c5ad.large c5d.large c6a.large c6i.large c6id.large c6in.large c7a.large c7i-flex.large c7i.large t2.medium t3.medium t3.small t3a.medium t3a.small]
-```
+For detailed API documentation, see [cmd/api-server/README.md](cmd/api-server/README.md).
 
 ## Building
 For build instructions please consult [BUILD.md](./BUILD.md).
