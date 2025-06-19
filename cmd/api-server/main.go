@@ -38,6 +38,7 @@ import (
 
 	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/bytequantity"
 	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/instancetypes"
+	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/metrics"
 	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/selector"
 	"github.com/aws/aws-sdk-go-v2/config"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
@@ -49,10 +50,12 @@ type APIServerConfig struct {
 	CacheDir             string
 	Port                 string
 	SkipPricingCacheInit bool
+	InfluxDB             metrics.InfluxDBConfig
 }
 
 type APIServer struct {
-	selector *selector.Selector
+	selector      *selector.Selector
+	metricsClient *metrics.InfluxDBClient
 }
 
 type FilterRequest struct {
@@ -135,8 +138,19 @@ func NewAPIServer(serverConfig APIServerConfig) (*APIServer, error) {
 		log.Printf("Skipping pricing cache initialization (SKIP_PRICING_CACHE_INIT=true)")
 	}
 
+	// Initialize InfluxDB client if enabled
+	var metricsClient *metrics.InfluxDBClient
+	if serverConfig.InfluxDB.Enabled {
+		metricsClient, err = metrics.NewInfluxDBClient(serverConfig.InfluxDB)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create InfluxDB client: %w", err)
+		}
+		log.Printf("InfluxDB metrics collection enabled")
+	}
+
 	return &APIServer{
-		selector: instanceSelector,
+		selector:      instanceSelector,
+		metricsClient: metricsClient,
 	}, nil
 }
 
@@ -182,6 +196,17 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.sendError(w, fmt.Sprintf("Filter execution failed: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Record metrics if enabled
+	if s.metricsClient != nil {
+		region := "unknown"
+		if filters.Region != nil {
+			region = *filters.Region
+		}
+		if err := s.metricsClient.RecordInstanceTypes(instanceTypes, region); err != nil {
+			log.Printf("Warning: failed to record metrics: %v", err)
+		}
 	}
 
 	// Limit results if max_results is specified
@@ -654,6 +679,11 @@ func parseConfig() APIServerConfig {
 		CacheDir:             getEnvString("EC2_INSTANCE_SELECTOR_CACHE_DIR", "~/.ec2-instance-selector/"),
 		Port:                 getEnvString("PORT", "8080"),
 		SkipPricingCacheInit: getEnvBool("EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT", false),
+		InfluxDB: metrics.InfluxDBConfig{
+			Enabled:  getEnvBool("INFLUXDB_ENABLED", false),
+			URL:      getEnvString("INFLUXDB_URL", ""),
+			Database: getEnvString("INFLUXDB_DATABASE", ""),
+		},
 	}
 }
 

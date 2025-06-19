@@ -535,3 +535,72 @@ This API can be easily integrated into:
 - Instance recommendation systems
 
 The JSON responses contain all the detailed instance information including pricing, specifications, and capabilities, making it perfect for building instance selection UIs or automated infrastructure provisioning tools.
+
+## Environment Variables
+
+### Core Configuration
+- `EC2_INSTANCE_SELECTOR_CACHE_TTL` - Cache time-to-live for pricing data (default: 24h)
+  - Examples: "1h", "30m", "24h", "0" (disables cache)
+- `EC2_INSTANCE_SELECTOR_CACHE_DIR` - Directory for cache files (default: ~/.ec2-instance-selector/)
+- `EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT` - Skip pricing cache initialization on startup (default: false)
+- `PORT` - Server port (default: 8080)
+
+### InfluxDB Metrics Configuration (v1.x)
+- `INFLUXDB_ENABLED` - Enable InfluxDB metrics collection (default: false)
+- `INFLUXDB_URL` - InfluxDB server URL (required if enabled)
+- `INFLUXDB_DATABASE` - InfluxDB database name (required if enabled)
+
+## Metrics Collection
+
+When InfluxDB metrics collection is enabled, the server will record instance metrics with the following schema:
+
+### ec2_instances
+Tags:
+- region
+- instance_type
+- family (e.g., "m5")
+- size (e.g., "large")
+- architecture
+
+Fields:
+- vcpus (integer)
+- memory_gb (float)
+
+## Example Usage
+
+### Basic Server Start
+```bash
+./api-server
+```
+
+### With InfluxDB Metrics
+```bash
+export INFLUXDB_ENABLED=true
+export INFLUXDB_URL="https://influxdb.example.com"
+export INFLUXDB_DATABASE="ec2metrics"
+./api-server
+```
+
+### Custom Configuration
+```bash
+export EC2_INSTANCE_SELECTOR_CACHE_TTL=12h
+export EC2_INSTANCE_SELECTOR_CACHE_DIR=/tmp/ec2-cache/
+export PORT=3000
+export INFLUXDB_ENABLED=true
+export INFLUXDB_URL="https://influxdb.example.com"
+export INFLUXDB_DATABASE="ec2metrics"
+./api-server
+```
+
+## API Endpoints
+
+### GET /health
+Health check endpoint.
+
+### GET /api/v1/instances
+Filter instances using query parameters.
+
+### POST /api/v1/instances/filter
+Filter instances using JSON request body.
+
+For detailed API documentation and examples, see the examples.sh file.
