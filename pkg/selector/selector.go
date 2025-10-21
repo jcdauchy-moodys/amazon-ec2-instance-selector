@@ -81,6 +81,7 @@ const (
 	instanceTypes                    = "instanceTypes"
 	virtualizationType               = "virtualizationType"
 	instanceStorageRange             = "instanceStorageRange"
+	nvmeInstanceStorageRange         = "nvmeInstanceStorageRange"
 	diskEncryption                   = "diskEncryption"
 	diskType                         = "diskType"
 	nvme                             = "nvme"
@@ -346,6 +347,7 @@ func (s Selector) prepareFilter(ctx context.Context, filters Filters, instanceTy
 		virtualizationType:               {filters.VirtualizationType, instanceTypeInfo.SupportedVirtualizationTypes},
 		pricePerHour:                     {filters.PricePerHour, &instanceTypeHourlyPriceForFilter},
 		instanceStorageRange:             {filters.InstanceStorageRange, getInstanceStorage(instanceTypeInfo.InstanceStorageInfo)},
+		nvmeInstanceStorageRange:         {filters.NVMEInstanceStorageRange, getNVMEInstanceStorage(instanceTypeInfo.InstanceStorageInfo)},
 		diskType:                         {filters.DiskType, getDiskType(instanceTypeInfo.InstanceStorageInfo)},
 		nvme:                             {filters.NVME, getNVMESupport(instanceTypeInfo.InstanceStorageInfo, instanceTypeInfo.EbsInfo)},
 		ebsOptimized:                     {filters.EBSOptimized, supportSyntaxToBool(&ebsOptimizedSupport)},

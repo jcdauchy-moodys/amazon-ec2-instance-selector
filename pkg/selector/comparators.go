@@ -325,6 +325,17 @@ func getInstanceStorage(instanceStorageInfo *ec2types.InstanceStorageInfo) *int6
 	return aws.Int64(*instanceStorageInfo.TotalSizeInGB * 1024)
 }
 
+func getNVMEInstanceStorage(instanceStorageInfo *ec2types.InstanceStorageInfo) *int64 {
+	if instanceStorageInfo == nil {
+		return aws.Int64(0)
+	}
+	// Only count storage if NVMe is required (not just supported)
+	if instanceStorageInfo.NvmeSupport != ec2types.EphemeralNvmeSupportRequired {
+		return aws.Int64(0)
+	}
+	return aws.Int64(*instanceStorageInfo.TotalSizeInGB * 1024)
+}
+
 func getDiskType(instanceStorageInfo *ec2types.InstanceStorageInfo) *string {
 	if instanceStorageInfo == nil || len(instanceStorageInfo.Disks) == 0 {
 		return nil

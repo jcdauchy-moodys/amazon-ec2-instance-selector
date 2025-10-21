@@ -102,6 +102,13 @@ func (c *InfluxDBClient) RecordInstanceTypes(instances []*instancetypes.Details,
 			fields = append(fields, fmt.Sprintf("memory_gb=%f", float64(*instance.MemoryInfo.SizeInMiB)/1024.0))
 		}
 
+		// Memory per vCPU ratio (GiB per vCPU)
+		if instance.VCpuInfo.DefaultVCpus != nil && *instance.VCpuInfo.DefaultVCpus > 0 && instance.MemoryInfo.SizeInMiB != nil {
+			memoryGiB := float64(*instance.MemoryInfo.SizeInMiB) / 1024.0
+			memoryPerVCpu := memoryGiB / float64(*instance.VCpuInfo.DefaultVCpus)
+			fields = append(fields, fmt.Sprintf("memory_per_vcpu=%f", memoryPerVCpu))
+		}
+
 		// Processor Information
 		if instance.ProcessorInfo.Manufacturer != nil {
 			fields = append(fields, fmt.Sprintf("cpu_manufacturer=\"%s\"", *instance.ProcessorInfo.Manufacturer))
@@ -165,9 +172,27 @@ func (c *InfluxDBClient) RecordInstanceTypes(instances []*instancetypes.Details,
 			}
 			if len(instance.InstanceStorageInfo.Disks) > 0 {
 				fields = append(fields, fmt.Sprintf("instance_storage_disks=%di", len(instance.InstanceStorageInfo.Disks)))
+
+				// Detailed disk information
+				for i, disk := range instance.InstanceStorageInfo.Disks {
+					if disk.SizeInGB != nil {
+						fields = append(fields, fmt.Sprintf("disk_%d_size_gb=%di", i, *disk.SizeInGB))
+					}
+					if disk.Count != nil {
+						fields = append(fields, fmt.Sprintf("disk_%d_count=%di", i, *disk.Count))
+					}
+					if disk.Type != "" {
+						fields = append(fields, fmt.Sprintf("disk_%d_type=\"%s\"", i, string(disk.Type)))
+					}
+				}
 			}
 			if instance.InstanceStorageInfo.NvmeSupport != "" {
 				fields = append(fields, fmt.Sprintf("nvme_support=\"%s\"", instance.InstanceStorageInfo.NvmeSupport))
+
+				// Add NVMe-only storage size (only when NVMe is required)
+				if instance.InstanceStorageInfo.NvmeSupport == "required" && instance.InstanceStorageInfo.TotalSizeInGB != nil {
+					fields = append(fields, fmt.Sprintf("nvme_instance_storage_gb=%di", *instance.InstanceStorageInfo.TotalSizeInGB))
+				}
 			}
 			if instance.InstanceStorageInfo.EncryptionSupport != "" {
 				fields = append(fields, fmt.Sprintf("storage_encryption_support=\"%s\"", instance.InstanceStorageInfo.EncryptionSupport))

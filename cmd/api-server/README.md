@@ -71,6 +71,9 @@ GET /api/v1/instances?vcpus=4&memory=8gb&cpu_architecture=x86_64
 - `burstable` - Burstable instances (true/false)
 - `free_tier` - Free tier eligible (true/false)
 - `nvme` - NVME storage support (true/false)
+- `nvme_instance_storage` - Exact NVMe instance storage size (e.g., "1tb")
+- `nvme_instance_storage_min` - Minimum NVMe instance storage (e.g., "500gb")
+- `nvme_instance_storage_max` - Maximum NVMe instance storage (e.g., "5tb")
 - `max_results` - Maximum number of results (default: 20)
 - `availability_zones` - Comma-separated list of AZs
 - `usage_class` - Usage class (on-demand, spot)
@@ -199,6 +202,12 @@ curl -X POST http://localhost:8080/api/v1/instances/filter \
 ```bash
 # Find instances that support NVME storage
 curl "http://localhost:8080/api/v1/instances?nvme=true&current_generation=true&max_results=5"
+
+# Find instances with at least 1TB of NVMe instance storage
+curl "http://localhost:8080/api/v1/instances?nvme_instance_storage_min=1tb&current_generation=true&max_results=10"
+
+# Find instances with NVMe storage between 500GB and 2TB
+curl "http://localhost:8080/api/v1/instances?nvme_instance_storage_min=500gb&nvme_instance_storage_max=2tb&current_generation=true"
 ```
 
 ```bash
@@ -207,6 +216,7 @@ curl -X POST http://localhost:8080/api/v1/instances/filter \
   -H "Content-Type: application/json" \
   -d '{
     "nvme": true,
+    "nvme_instance_storage_min": "1tb",
     "vcpus_min": 4,
     "memory_min": "16gb",
     "current_generation": true,

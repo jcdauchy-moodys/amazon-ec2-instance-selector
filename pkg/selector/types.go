@@ -253,6 +253,10 @@ type Filters struct {
 	// InstanceStorageRange filters on a range of storage available as local disk
 	InstanceStorageRange *ByteQuantityRangeFilter
 
+	// NVMEInstanceStorageRange filters on a range of NVMe instance storage only
+	// Only includes storage when nvme_support is "required"
+	NVMEInstanceStorageRange *ByteQuantityRangeFilter
+
 	// DiskType is the backing storage medium
 	// Possible values are: hdd or ssd
 	DiskType *string

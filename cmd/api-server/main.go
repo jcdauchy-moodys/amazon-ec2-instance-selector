@@ -12,7 +12,11 @@
 //	EC2_INSTANCE_SELECTOR_VERBOSE   - Enable verbose/debug logging (default: false)
 //	                                   Set to "true" to see detailed AWS API calls and timing information
 //	PORT                            - Server port (default: 8080)
-//	AWS_REGION or AWS_DEFAULT_REGION - AWS region (required)
+//	AWS_REGION or AWS_DEFAULT_REGION - AWS region (required, default region for queries)
+//	                                   This is the default region for AWS API queries.
+//	                                   If a 'region' filter is passed in API requests, queries will
+//	                                   be executed in that region instead. The server caches selectors
+//	                                   per region for performance.
 //	INFLUXDB_ENABLED                - Enable InfluxDB metrics collection (default: false)
 //	INFLUXDB_URL                    - InfluxDB server URL (required if metrics enabled)
 //	INFLUXDB_DATABASE               - InfluxDB database name (required if metrics enabled)
@@ -50,12 +54,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/bytequantity"
 	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/instancetypes"
 	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/metrics"
 	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/selector"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/mitchellh/go-homedir"
@@ -71,36 +77,46 @@ type APIServerConfig struct {
 }
 
 type APIServer struct {
-	selector      *selector.Selector
+	baseConfig    aws.Config
+	selector      *selector.Selector            // selector for the default region
+	selectors     map[string]*selector.Selector // cache of selectors per region
 	metricsClient *metrics.InfluxDBClient
+	region        string // AWS region from config (default)
+	cacheTTL      time.Duration
+	cacheDir      string
+	verbose       bool
+	mu            sync.RWMutex // protects selectors map
 }
 
 type FilterRequest struct {
-	VCPUs              *int32   `json:"vcpus,omitempty"`
-	VCPUsMin           *int32   `json:"vcpus_min,omitempty"`
-	VCPUsMax           *int32   `json:"vcpus_max,omitempty"`
-	Memory             *string  `json:"memory,omitempty"`
-	MemoryMin          *string  `json:"memory_min,omitempty"`
-	MemoryMax          *string  `json:"memory_max,omitempty"`
-	MemoryPerCpuMin    *float64 `json:"memory_per_cpu_min,omitempty"`
-	MemoryPerCpuMax    *float64 `json:"memory_per_cpu_max,omitempty"`
-	CPUArchitecture    *string  `json:"cpu_architecture,omitempty"`
-	InstanceTypes      []string `json:"instance_types,omitempty"`
-	AllowList          *string  `json:"allow_list,omitempty"`
-	DenyList           *string  `json:"deny_list,omitempty"`
-	CurrentGeneration  *bool    `json:"current_generation,omitempty"`
-	BareMetal          *bool    `json:"bare_metal,omitempty"`
-	Burstable          *bool    `json:"burstable,omitempty"`
-	MaxResults         *int     `json:"max_results,omitempty"`
-	Region             *string  `json:"region,omitempty"`
-	AvailabilityZones  []string `json:"availability_zones,omitempty"`
-	UsageClass         *string  `json:"usage_class,omitempty"`
-	GPUs               *int32   `json:"gpus,omitempty"`
-	GPUsMin            *int32   `json:"gpus_min,omitempty"`
-	GPUsMax            *int32   `json:"gpus_max,omitempty"`
-	NetworkPerformance *int     `json:"network_performance,omitempty"`
-	FreeTier           *bool    `json:"free_tier,omitempty"`
-	NVME               *bool    `json:"nvme,omitempty"`
+	VCPUs                  *int32   `json:"vcpus,omitempty"`
+	VCPUsMin               *int32   `json:"vcpus_min,omitempty"`
+	VCPUsMax               *int32   `json:"vcpus_max,omitempty"`
+	Memory                 *string  `json:"memory,omitempty"`
+	MemoryMin              *string  `json:"memory_min,omitempty"`
+	MemoryMax              *string  `json:"memory_max,omitempty"`
+	MemoryPerCpuMin        *float64 `json:"memory_per_cpu_min,omitempty"`
+	MemoryPerCpuMax        *float64 `json:"memory_per_cpu_max,omitempty"`
+	CPUArchitecture        *string  `json:"cpu_architecture,omitempty"`
+	InstanceTypes          []string `json:"instance_types,omitempty"`
+	AllowList              *string  `json:"allow_list,omitempty"`
+	DenyList               *string  `json:"deny_list,omitempty"`
+	CurrentGeneration      *bool    `json:"current_generation,omitempty"`
+	BareMetal              *bool    `json:"bare_metal,omitempty"`
+	Burstable              *bool    `json:"burstable,omitempty"`
+	MaxResults             *int     `json:"max_results,omitempty"`
+	Region                 *string  `json:"region,omitempty"`
+	AvailabilityZones      []string `json:"availability_zones,omitempty"`
+	UsageClass             *string  `json:"usage_class,omitempty"`
+	GPUs                   *int32   `json:"gpus,omitempty"`
+	GPUsMin                *int32   `json:"gpus_min,omitempty"`
+	GPUsMax                *int32   `json:"gpus_max,omitempty"`
+	NetworkPerformance     *int     `json:"network_performance,omitempty"`
+	FreeTier               *bool    `json:"free_tier,omitempty"`
+	NVME                   *bool    `json:"nvme,omitempty"`
+	NVMEInstanceStorageMin *string  `json:"nvme_instance_storage_min,omitempty"`
+	NVMEInstanceStorageMax *string  `json:"nvme_instance_storage_max,omitempty"`
+	NVMEInstanceStorage    *string  `json:"nvme_instance_storage,omitempty"`
 }
 
 type APIResponse struct {
@@ -129,7 +145,7 @@ func NewAPIServer(serverConfig APIServerConfig) (*APIServer, error) {
 		return nil, fmt.Errorf("AWS region must be configured. Set AWS_REGION or AWS_DEFAULT_REGION environment variable, or configure it in ~/.aws/config")
 	}
 
-	log.Printf("Using AWS region: %s", cfg.Region)
+	log.Printf("Using default AWS region: %s", cfg.Region)
 
 	var expandedCacheDir string
 	if serverConfig.CacheTTL > 0 {
@@ -143,8 +159,8 @@ func NewAPIServer(serverConfig APIServerConfig) (*APIServer, error) {
 		expandedCacheDir = serverConfig.CacheDir
 	}
 
-	// Create selector instance with configurable pricing cache
-	log.Printf("Initializing selector with cache TTL: %v, cache dir: %s", serverConfig.CacheTTL, expandedCacheDir)
+	// Create selector instance with configurable pricing cache for default region
+	log.Printf("Initializing default selector with cache TTL: %v, cache dir: %s", serverConfig.CacheTTL, expandedCacheDir)
 	instanceSelector, err := selector.NewWithCache(ctx, cfg, serverConfig.CacheTTL, expandedCacheDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create selector: %w", err)
@@ -192,9 +208,68 @@ func NewAPIServer(serverConfig APIServerConfig) (*APIServer, error) {
 	}
 
 	return &APIServer{
+		baseConfig:    cfg,
 		selector:      instanceSelector,
+		selectors:     make(map[string]*selector.Selector),
 		metricsClient: metricsClient,
+		region:        cfg.Region,
+		cacheTTL:      serverConfig.CacheTTL,
+		cacheDir:      expandedCacheDir,
+		verbose:       serverConfig.Verbose,
 	}, nil
+}
+
+// getSelectorForRegion returns a selector for the specified region.
+// If region is empty or matches the default region, returns the default selector.
+// Otherwise, creates or retrieves a cached selector for that region.
+func (s *APIServer) getSelectorForRegion(ctx context.Context, region string) (*selector.Selector, error) {
+	// If no region specified or it matches default, use the default selector
+	if region == "" || region == s.region {
+		return s.selector, nil
+	}
+
+	// Check if we already have a selector for this region
+	s.mu.RLock()
+	sel, exists := s.selectors[region]
+	s.mu.RUnlock()
+
+	if exists {
+		return sel, nil
+	}
+
+	// Need to create a new selector for this region
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Double-check in case another goroutine created it while we were waiting for the lock
+	if sel, exists := s.selectors[region]; exists {
+		return sel, nil
+	}
+
+	log.Printf("Creating new selector for region: %s", region)
+
+	// Create a new config with the specified region
+	regionConfig := s.baseConfig.Copy()
+	regionConfig.Region = region
+
+	// Create selector for this region
+	regionSelector, err := selector.NewWithCache(ctx, regionConfig, s.cacheTTL, s.cacheDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create selector for region %s: %w", region, err)
+	}
+
+	// Configure logging
+	if s.verbose {
+		regionSelector.SetLogger(log.Default())
+	} else {
+		regionSelector.SetLogger(log.New(io.Discard, "", 0))
+	}
+
+	// Cache the selector
+	s.selectors[region] = regionSelector
+	log.Printf("Selector for region %s created and cached", region)
+
+	return regionSelector, nil
 }
 
 func (s *APIServer) healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -237,22 +312,35 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Determine which region to query
+	queryRegion := s.region
+	if filters.Region != nil {
+		queryRegion = *filters.Region
+		if queryRegion != s.region {
+			log.Printf("Querying region %s (different from default region %s)", queryRegion, s.region)
+		}
+	}
+
+	// Get the appropriate selector for the region
+	regionSelector, err := s.getSelectorForRegion(ctx, queryRegion)
+	if err != nil {
+		log.Printf("Failed to get selector for region %s: %v", queryRegion, err)
+		s.sendError(w, fmt.Sprintf("Failed to initialize for region %s: %v", queryRegion, err), http.StatusInternalServerError)
+		return
+	}
+
 	start := time.Now()
-	instanceTypes, err := s.selector.FilterVerbose(ctx, filters)
+	instanceTypes, err := regionSelector.FilterVerbose(ctx, filters)
 	if err != nil {
 		log.Printf("Filter execution failed: %v", err)
 		s.sendError(w, fmt.Sprintf("Filter execution failed: %v", err), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Filter executed in %v, found %d instances", time.Since(start), len(instanceTypes))
+	log.Printf("Filter executed in %v for region %s, found %d instances", time.Since(start), queryRegion, len(instanceTypes))
 
 	// Record metrics if enabled
 	if s.metricsClient != nil {
-		region := "unknown"
-		if filters.Region != nil {
-			region = *filters.Region
-		}
-		if err := s.metricsClient.RecordInstanceTypes(instanceTypes, region); err != nil {
+		if err := s.metricsClient.RecordInstanceTypes(instanceTypes, queryRegion); err != nil {
 			log.Printf("Warning: failed to record metrics: %v", err)
 		}
 	}
@@ -299,22 +387,35 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Determine which region to query
+	queryRegion := s.region
+	if filters.Region != nil {
+		queryRegion = *filters.Region
+		if queryRegion != s.region {
+			log.Printf("Querying region %s (different from default region %s)", queryRegion, s.region)
+		}
+	}
+
+	// Get the appropriate selector for the region
+	regionSelector, err := s.getSelectorForRegion(ctx, queryRegion)
+	if err != nil {
+		log.Printf("Failed to get selector for region %s: %v", queryRegion, err)
+		s.sendError(w, fmt.Sprintf("Failed to initialize for region %s: %v", queryRegion, err), http.StatusInternalServerError)
+		return
+	}
+
 	start := time.Now()
-	instanceTypes, err := s.selector.FilterVerbose(ctx, filters)
+	instanceTypes, err := regionSelector.FilterVerbose(ctx, filters)
 	if err != nil {
 		log.Printf("Filter execution failed: %v", err)
 		s.sendError(w, fmt.Sprintf("Filter execution failed: %v", err), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Filter executed in %v, found %d instances", time.Since(start), len(instanceTypes))
+	log.Printf("Filter executed in %v for region %s, found %d instances", time.Since(start), queryRegion, len(instanceTypes))
 
 	// Record metrics if enabled
 	if s.metricsClient != nil {
-		region := "unknown"
-		if filters.Region != nil {
-			region = *filters.Region
-		}
-		if err := s.metricsClient.RecordInstanceTypes(instanceTypes, region); err != nil {
+		if err := s.metricsClient.RecordInstanceTypes(instanceTypes, queryRegion); err != nil {
 			log.Printf("Warning: failed to record metrics: %v", err)
 		}
 	}
@@ -479,6 +580,18 @@ func (s *APIServer) parseQueryParams(r *http.Request) FilterRequest {
 		}
 	}
 
+	if nvmeStorage := r.URL.Query().Get("nvme_instance_storage"); nvmeStorage != "" {
+		req.NVMEInstanceStorage = &nvmeStorage
+	}
+
+	if nvmeStorageMin := r.URL.Query().Get("nvme_instance_storage_min"); nvmeStorageMin != "" {
+		req.NVMEInstanceStorageMin = &nvmeStorageMin
+	}
+
+	if nvmeStorageMax := r.URL.Query().Get("nvme_instance_storage_max"); nvmeStorageMax != "" {
+		req.NVMEInstanceStorageMax = &nvmeStorageMax
+	}
+
 	return req
 }
 
@@ -620,6 +733,35 @@ func (s *APIServer) requestToFilters(req FilterRequest) (selector.Filters, error
 	// Set region if provided
 	if req.Region != nil {
 		filters.Region = req.Region
+	}
+
+	// NVMe Instance Storage range
+	if req.NVMEInstanceStorage != nil {
+		bq, err := bytequantity.ParseToByteQuantity(*req.NVMEInstanceStorage)
+		if err != nil {
+			return filters, fmt.Errorf("invalid nvme_instance_storage format: %w", err)
+		}
+		filters.NVMEInstanceStorageRange = &selector.ByteQuantityRangeFilter{
+			LowerBound: bq,
+			UpperBound: bq,
+		}
+	} else if req.NVMEInstanceStorageMin != nil || req.NVMEInstanceStorageMax != nil {
+		rangeFilter := &selector.ByteQuantityRangeFilter{}
+		if req.NVMEInstanceStorageMin != nil {
+			bq, err := bytequantity.ParseToByteQuantity(*req.NVMEInstanceStorageMin)
+			if err != nil {
+				return filters, fmt.Errorf("invalid nvme_instance_storage_min format: %w", err)
+			}
+			rangeFilter.LowerBound = bq
+		}
+		if req.NVMEInstanceStorageMax != nil {
+			bq, err := bytequantity.ParseToByteQuantity(*req.NVMEInstanceStorageMax)
+			if err != nil {
+				return filters, fmt.Errorf("invalid nvme_instance_storage_max format: %w", err)
+			}
+			rangeFilter.UpperBound = bq
+		}
+		filters.NVMEInstanceStorageRange = rangeFilter
 	}
 
 	return filters, nil
