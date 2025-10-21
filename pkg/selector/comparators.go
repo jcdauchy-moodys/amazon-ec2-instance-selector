@@ -178,7 +178,18 @@ func isSupportedWithRangeInt64(instanceTypeValue *int64, target *IntRangeFilter)
 	} else if instanceTypeValue == nil {
 		return false
 	}
-	return int(*instanceTypeValue) >= target.LowerBound && int(*instanceTypeValue) <= target.UpperBound
+
+	// Check lower bound
+	if int(*instanceTypeValue) < target.LowerBound {
+		return false
+	}
+
+	// Check upper bound only if it's set (non-zero)
+	if target.UpperBound > 0 {
+		return int(*instanceTypeValue) <= target.UpperBound
+	}
+
+	return true
 }
 
 func isSupportedWithRangeInt32(instanceTypeValue *int32, target *Int32RangeFilter) bool {
@@ -189,7 +200,18 @@ func isSupportedWithRangeInt32(instanceTypeValue *int32, target *Int32RangeFilte
 	} else if instanceTypeValue == nil {
 		return false
 	}
-	return *instanceTypeValue >= target.LowerBound && *instanceTypeValue <= target.UpperBound
+
+	// Check lower bound
+	if *instanceTypeValue < target.LowerBound {
+		return false
+	}
+
+	// Check upper bound only if it's set (non-zero)
+	if target.UpperBound > 0 {
+		return *instanceTypeValue <= target.UpperBound
+	}
+
+	return true
 }
 
 func isSupportedWithRangeUint64(instanceTypeValue *int64, target *Uint64RangeFilter) bool {
@@ -200,10 +222,21 @@ func isSupportedWithRangeUint64(instanceTypeValue *int64, target *Uint64RangeFil
 	} else if instanceTypeValue == nil {
 		return false
 	}
-	if target.UpperBound > math.MaxInt64 {
-		target.UpperBound = math.MaxInt64
+
+	// Check lower bound
+	if uint64(*instanceTypeValue) < target.LowerBound {
+		return false
 	}
-	return uint64(*instanceTypeValue) >= target.LowerBound && uint64(*instanceTypeValue) <= target.UpperBound
+
+	// Check upper bound only if it's set (non-zero)
+	if target.UpperBound > 0 {
+		if target.UpperBound > math.MaxInt64 {
+			target.UpperBound = math.MaxInt64
+		}
+		return uint64(*instanceTypeValue) <= target.UpperBound
+	}
+
+	return true
 }
 
 func isSupportedWithRangeFloat64(instanceTypeValue *float64, target *Float64RangeFilter) bool {
@@ -214,7 +247,18 @@ func isSupportedWithRangeFloat64(instanceTypeValue *float64, target *Float64Rang
 	} else if instanceTypeValue == nil {
 		return false
 	}
-	return float64(*instanceTypeValue) >= target.LowerBound && float64(*instanceTypeValue) <= target.UpperBound
+
+	// Check lower bound
+	if float64(*instanceTypeValue) < target.LowerBound {
+		return false
+	}
+
+	// Check upper bound only if it's set (non-zero)
+	if target.UpperBound > 0.0 {
+		return float64(*instanceTypeValue) <= target.UpperBound
+	}
+
+	return true
 }
 
 func isSupportedWithBool(instanceTypeValue *bool, target *bool) bool {

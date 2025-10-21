@@ -102,6 +102,25 @@ The following filters are currently available through the API endpoints (`GET /a
 |--------|------|-------------|---------|
 | `usage_class` | string | Usage class | `"on-demand"`, `"spot"` |
 
+### Price Filters
+
+| Filter | Type | Description | Example |
+|--------|------|-------------|---------|
+| `price_per_hour` | float | Exact price per hour in USD | `0.50` |
+| `price_per_hour_min` | float | Minimum price per hour in USD | `0.10` |
+| `price_per_hour_max` | float | Maximum price per hour in USD | `1.00` |
+
+**Important Notes:**
+- By default, filters on-demand pricing
+- When combined with `usage_class=spot`, filters spot pricing (30-day average)
+- Requires pricing data to be cached (enabled by default)
+- If `EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT=true`, price fields will be null and filter will exclude all instances
+
+**Price Filter Behavior:**
+- Uses **on-demand price** when `usage_class` is not specified or set to `"on-demand"`
+- Uses **spot price** (30-day average) when `usage_class` is set to `"spot"`
+- The response includes both `OndemandPricePerHour` and `SpotPrice` fields (when available)
+
 ### Result Limit
 
 | Filter | Type | Description | Example |
@@ -122,6 +141,21 @@ curl "http://localhost:8080/api/v1/instances?nvme_instance_storage_min=1tb&curre
 
 # Find instances with NVMe storage between 500GB and 2TB
 curl "http://localhost:8080/api/v1/instances?nvme_instance_storage_min=500gb&nvme_instance_storage_max=2tb&current_generation=true"
+```
+
+### GET Request - Price filtering
+```bash
+# Find on-demand instances cheaper than $0.50/hour
+curl "http://localhost:8080/api/v1/instances?price_per_hour_max=0.50&current_generation=true"
+
+# Find on-demand instances between $0.10 and $0.30/hour
+curl "http://localhost:8080/api/v1/instances?price_per_hour_min=0.10&price_per_hour_max=0.30&current_generation=true"
+
+# Find spot instances cheaper than $0.10/hour
+curl "http://localhost:8080/api/v1/instances?price_per_hour_max=0.10&usage_class=spot&current_generation=true"
+
+# Find cost-effective instances: 4+ vCPUs, 16GB+ RAM, under $0.50/hour
+curl "http://localhost:8080/api/v1/instances?vcpus_min=4&memory_min=16gb&price_per_hour_max=0.50&current_generation=true"
 ```
 
 ### POST Request
@@ -150,6 +184,33 @@ curl -X POST http://localhost:8080/api/v1/instances/filter \
     "nvme_instance_storage_min": "1tb",
     "nvme_instance_storage_max": "5tb",
     "cpu_architecture": "x86_64",
+    "current_generation": true,
+    "max_results": 20
+  }'
+```
+
+### POST Request - Price filtering
+```bash
+# Find cost-effective compute instances
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "vcpus_min": 4,
+    "memory_min": "16gb",
+    "price_per_hour_max": 0.50,
+    "current_generation": true,
+    "cpu_architecture": "x86_64",
+    "max_results": 20
+  }'
+
+# Find cheap spot instances
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "price_per_hour_min": 0.05,
+    "price_per_hour_max": 0.15,
+    "usage_class": "spot",
+    "vcpus_min": 2,
     "current_generation": true,
     "max_results": 20
   }'

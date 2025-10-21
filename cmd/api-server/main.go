@@ -117,6 +117,9 @@ type FilterRequest struct {
 	NVMEInstanceStorageMin *string  `json:"nvme_instance_storage_min,omitempty"`
 	NVMEInstanceStorageMax *string  `json:"nvme_instance_storage_max,omitempty"`
 	NVMEInstanceStorage    *string  `json:"nvme_instance_storage,omitempty"`
+	PricePerHour           *float64 `json:"price_per_hour,omitempty"`
+	PricePerHourMin        *float64 `json:"price_per_hour_min,omitempty"`
+	PricePerHourMax        *float64 `json:"price_per_hour_max,omitempty"`
 }
 
 type APIResponse struct {
@@ -598,6 +601,24 @@ func (s *APIServer) parseQueryParams(r *http.Request) FilterRequest {
 		req.NVMEInstanceStorageMax = &nvmeStorageMax
 	}
 
+	if pricePerHour := r.URL.Query().Get("price_per_hour"); pricePerHour != "" {
+		if v, err := strconv.ParseFloat(pricePerHour, 64); err == nil {
+			req.PricePerHour = &v
+		}
+	}
+
+	if pricePerHourMin := r.URL.Query().Get("price_per_hour_min"); pricePerHourMin != "" {
+		if v, err := strconv.ParseFloat(pricePerHourMin, 64); err == nil {
+			req.PricePerHourMin = &v
+		}
+	}
+
+	if pricePerHourMax := r.URL.Query().Get("price_per_hour_max"); pricePerHourMax != "" {
+		if v, err := strconv.ParseFloat(pricePerHourMax, 64); err == nil {
+			req.PricePerHourMax = &v
+		}
+	}
+
 	return req
 }
 
@@ -768,6 +789,23 @@ func (s *APIServer) requestToFilters(req FilterRequest) (selector.Filters, error
 			rangeFilter.UpperBound = bq
 		}
 		filters.NVMEInstanceStorageRange = rangeFilter
+	}
+
+	// Price per hour range
+	if req.PricePerHour != nil {
+		filters.PricePerHour = &selector.Float64RangeFilter{
+			LowerBound: *req.PricePerHour,
+			UpperBound: *req.PricePerHour,
+		}
+	} else if req.PricePerHourMin != nil || req.PricePerHourMax != nil {
+		rangeFilter := &selector.Float64RangeFilter{}
+		if req.PricePerHourMin != nil {
+			rangeFilter.LowerBound = *req.PricePerHourMin
+		}
+		if req.PricePerHourMax != nil {
+			rangeFilter.UpperBound = *req.PricePerHourMax
+		}
+		filters.PricePerHour = rangeFilter
 	}
 
 	return filters, nil
