@@ -235,9 +235,16 @@ func (s Selector) rawFilter(ctx context.Context, filters Filters) ([]*instancety
 	if err != nil {
 		return nil, err
 	}
+
+	totalInstances := len(instanceTypeDetails)
 	filteredInstanceTypes := []*instancetypes.Details{}
 	var wg sync.WaitGroup
 	instanceTypes := make(chan *instancetypes.Details, len(instanceTypeDetails))
+
+	if s.Logger != nil {
+		s.Logger.Printf("Starting filter evaluation on %d instance types", totalInstances)
+	}
+
 	for _, instanceTypeInfo := range instanceTypeDetails {
 		wg.Add(1)
 		go func(instanceTypeInfo instancetypes.Details) {
@@ -258,6 +265,12 @@ func (s Selector) rawFilter(ctx context.Context, filters Filters) ([]*instancety
 	for it := range instanceTypes {
 		filteredInstanceTypes = append(filteredInstanceTypes, it)
 	}
+
+	if s.Logger != nil {
+		s.Logger.Printf("Filter evaluation complete: %d instances matched out of %d total (%d filtered out)",
+			len(filteredInstanceTypes), totalInstances, totalInstances-len(filteredInstanceTypes))
+	}
+
 	return sortInstanceTypeInfo(filteredInstanceTypes), nil
 }
 
@@ -365,11 +378,28 @@ func (s Selector) prepareFilter(ctx context.Context, filters Filters, instanceTy
 		generation:                       {filters.Generation, getInstanceTypeGeneration(string(instanceTypeInfo.InstanceType))},
 	}
 
-	if isInDenyList(filters.DenyList, instanceTypeName) || !isInAllowList(filters.AllowList, instanceTypeName) {
+	if isInDenyList(filters.DenyList, instanceTypeName) {
+		if s.Logger != nil {
+			s.Logger.Printf("Instance %s filtered out: denyList (matches pattern '%s')", instanceTypeName, filters.DenyList.String())
+		}
+		return nil, nil
+	}
+
+	if !isInAllowList(filters.AllowList, instanceTypeName) {
+		if s.Logger != nil && filters.AllowList != nil {
+			s.Logger.Printf("Instance %s filtered out: allowList (does not match pattern '%s')", instanceTypeName, filters.AllowList.String())
+		}
 		return nil, nil
 	}
 
 	if !isSupportedInLocation(locationInstanceOfferings, instanceTypeName) {
+		if s.Logger != nil {
+			if filters.AvailabilityZones != nil && len(*filters.AvailabilityZones) > 0 {
+				s.Logger.Printf("Instance %s filtered out: not available in availability zones %v", instanceTypeName, *filters.AvailabilityZones)
+			} else if filters.Region != nil {
+				s.Logger.Printf("Instance %s filtered out: not available in region %s", instanceTypeName, *filters.Region)
+			}
+		}
 		return nil, nil
 	}
 
