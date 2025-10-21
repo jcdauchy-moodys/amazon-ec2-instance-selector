@@ -308,6 +308,17 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Filter executed in %v, found %d instances", time.Since(start), len(instanceTypes))
 
+	// Record metrics if enabled
+	if s.metricsClient != nil {
+		region := "unknown"
+		if filters.Region != nil {
+			region = *filters.Region
+		}
+		if err := s.metricsClient.RecordInstanceTypes(instanceTypes, region); err != nil {
+			log.Printf("Warning: failed to record metrics: %v", err)
+		}
+	}
+
 	// Limit results if max_results is specified
 	maxResults := 20 // default
 	if req.MaxResults != nil {
