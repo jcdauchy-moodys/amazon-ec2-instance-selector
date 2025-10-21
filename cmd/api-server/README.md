@@ -18,11 +18,15 @@ A REST API server built on top of the Amazon EC2 Instance Selector library that 
 
 - Go 1.19+ installed
 - AWS credentials configured (AWS CLI, environment variables, or IAM roles)
+- **AWS region configured** (required)
 - Access to AWS EC2 API
 
 ### Running the Server
 
 ```bash
+# Set AWS region (required)
+export AWS_REGION=us-east-1
+
 # Build and run the API server
 go run cmd/api-server/main.go
 ```
@@ -426,17 +430,27 @@ curl "http://localhost:8080/api/v1/instances?deny_list=[acimr][1-4].*&current_ge
 
 ## Configuration
 
-### AWS Credentials
+### AWS Credentials and Region
 
 The server uses AWS SDK default configuration for credentials:
 1. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
 2. Shared credentials file (`~/.aws/credentials`)
 3. IAM roles (for EC2 instances)
 
-You can also set the AWS region:
-```bash
-export AWS_REGION=us-west-2
-```
+**AWS region is required** and can be set via:
+1. Environment variable:
+   ```bash
+   export AWS_REGION=us-west-2
+   # OR
+   export AWS_DEFAULT_REGION=us-west-2
+   ```
+2. AWS config file (`~/.aws/config`):
+   ```ini
+   [default]
+   region = us-west-2
+   ```
+
+If no region is configured, the server will fail to start with an error message.
 
 ### Server Configuration
 
@@ -444,21 +458,25 @@ The API server can be configured using environment variables:
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
+| `AWS_REGION` or `AWS_DEFAULT_REGION` | *(required)* | AWS region to use for API calls |
 | `PORT` | `8080` | Server port |
 | `EC2_INSTANCE_SELECTOR_CACHE_TTL` | `24h` | Cache time-to-live for pricing data. Examples: `1h`, `30m`, `24h`, `0` (disables cache) |
 | `EC2_INSTANCE_SELECTOR_CACHE_DIR` | `~/.ec2-instance-selector/` | Directory for cache files |
 | `EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT` | `false` | Skip pricing cache initialization on startup for faster startup |
+| `EC2_INSTANCE_SELECTOR_VERBOSE` | `false` | Enable verbose/debug logging to see detailed AWS API calls and timing |
 
 ### Pricing Data Configuration
 
 **Default Behavior (Recommended):**
 ```bash
 # Uses 24-hour cache, initializes pricing on startup
+export AWS_REGION=us-east-1
 ./ec2-api-server
 ```
 
 **Custom Cache Configuration:**
 ```bash
+export AWS_REGION=us-west-2
 export EC2_INSTANCE_SELECTOR_CACHE_TTL=12h
 export EC2_INSTANCE_SELECTOR_CACHE_DIR=/tmp/ec2-cache/
 export PORT=3000
@@ -468,6 +486,7 @@ export PORT=3000
 **Fast Startup (No Pricing Data):**
 ```bash
 # Starts quickly but OndemandPricePerHour and SpotPrice will be null
+export AWS_REGION=us-east-1
 export EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT=true
 ./ec2-api-server
 ```
@@ -475,6 +494,7 @@ export EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT=true
 **Disable Pricing Cache:**
 ```bash
 # No pricing data cached or returned
+export AWS_REGION=us-east-1
 export EC2_INSTANCE_SELECTOR_CACHE_TTL=0
 ./ec2-api-server
 ```
@@ -485,6 +505,43 @@ export EC2_INSTANCE_SELECTOR_CACHE_TTL=0
 - **Subsequent startups** are fast since pricing data is cached
 - **OndemandPricePerHour** and **SpotPrice** fields will only be populated when pricing cache is enabled and initialized
 - **Spot prices** are 30-day averages across availability zones
+
+### Verbose Logging
+
+Enable verbose logging to see detailed information about:
+- AWS API calls and their timing
+- Pricing cache operations
+- Filter execution performance
+- Request processing details
+
+```bash
+export AWS_REGION=us-east-1
+export EC2_INSTANCE_SELECTOR_VERBOSE=true
+./ec2-api-server
+```
+
+**Normal mode logs:**
+```
+2025/10/21 10:34:10 Starting EC2 Instance Selector API Server...
+2025/10/21 10:34:10 Server successfully initialized!
+2025/10/21 10:34:15 Filter executed in 125ms, found 15 instances
+```
+
+**Verbose mode logs:**
+```
+2025/10/21 10:34:10 Starting EC2 Instance Selector API Server...
+2025/10/21 10:34:10 Verbose logging enabled
+2025/10/21 10:34:10 Took 301ms and 1 calls to collect OD pricing
+2025/10/21 10:34:10 Server successfully initialized!
+2025/10/21 10:34:15 Filter executed in 125ms, found 15 instances
+... (detailed AWS SDK logs)
+```
+
+Verbose mode is useful for:
+- **Debugging** performance issues
+- **Troubleshooting** API call failures
+- **Understanding** cache behavior
+- **Monitoring** AWS API usage
 
 ## Building
 
@@ -518,6 +575,7 @@ Build and run:
 ```bash
 docker build -t ec2-instance-selector-api .
 docker run -p 8080:8080 \
+  -e AWS_REGION=us-east-1 \
   -e AWS_ACCESS_KEY_ID=xxx \
   -e AWS_SECRET_ACCESS_KEY=yyy \
   -e EC2_INSTANCE_SELECTOR_CACHE_TTL=12h \
@@ -539,16 +597,19 @@ The JSON responses contain all the detailed instance information including prici
 ## Environment Variables
 
 ### Core Configuration
+- `AWS_REGION` or `AWS_DEFAULT_REGION` - AWS region (required)
 - `EC2_INSTANCE_SELECTOR_CACHE_TTL` - Cache time-to-live for pricing data (default: 24h)
   - Examples: "1h", "30m", "24h", "0" (disables cache)
 - `EC2_INSTANCE_SELECTOR_CACHE_DIR` - Directory for cache files (default: ~/.ec2-instance-selector/)
 - `EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT` - Skip pricing cache initialization on startup (default: false)
+- `EC2_INSTANCE_SELECTOR_VERBOSE` - Enable verbose/debug logging (default: false)
 - `PORT` - Server port (default: 8080)
 
 ### InfluxDB Metrics Configuration (v1.x)
 - `INFLUXDB_ENABLED` - Enable InfluxDB metrics collection (default: false)
 - `INFLUXDB_URL` - InfluxDB server URL (required if enabled)
 - `INFLUXDB_DATABASE` - InfluxDB database name (required if enabled)
+- `INFLUXDB_JWT` - JWT token for InfluxDB authentication (optional, adds Authorization Bearer header)
 
 ## Metrics Collection
 
@@ -570,25 +631,30 @@ Fields:
 
 ### Basic Server Start
 ```bash
+export AWS_REGION=us-east-1
 ./api-server
 ```
 
 ### With InfluxDB Metrics
 ```bash
+export AWS_REGION=us-east-1
 export INFLUXDB_ENABLED=true
 export INFLUXDB_URL="https://influxdb.example.com"
 export INFLUXDB_DATABASE="ec2metrics"
+export INFLUXDB_JWT="your-jwt-token-here"  # Optional, for authenticated InfluxDB
 ./api-server
 ```
 
 ### Custom Configuration
 ```bash
+export AWS_REGION=us-east-1
 export EC2_INSTANCE_SELECTOR_CACHE_TTL=12h
 export EC2_INSTANCE_SELECTOR_CACHE_DIR=/tmp/ec2-cache/
 export PORT=3000
 export INFLUXDB_ENABLED=true
 export INFLUXDB_URL="https://influxdb.example.com"
 export INFLUXDB_DATABASE="ec2metrics"
+export INFLUXDB_JWT="your-jwt-token-here"  # Optional, for authenticated InfluxDB
 ./api-server
 ```
 

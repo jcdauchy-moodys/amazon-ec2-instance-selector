@@ -9,7 +9,14 @@
 //	EC2_INSTANCE_SELECTOR_CACHE_DIR - Directory for cache files (default: ~/.ec2-instance-selector/)
 //	EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT - Skip pricing cache initialization on startup (default: false)
 //	                                   Set to "true" for faster startup without pricing data
+//	EC2_INSTANCE_SELECTOR_VERBOSE   - Enable verbose/debug logging (default: false)
+//	                                   Set to "true" to see detailed AWS API calls and timing information
 //	PORT                            - Server port (default: 8080)
+//	AWS_REGION or AWS_DEFAULT_REGION - AWS region (required)
+//	INFLUXDB_ENABLED                - Enable InfluxDB metrics collection (default: false)
+//	INFLUXDB_URL                    - InfluxDB server URL (required if metrics enabled)
+//	INFLUXDB_DATABASE               - InfluxDB database name (required if metrics enabled)
+//	INFLUXDB_JWT                    - JWT token for InfluxDB authentication (optional)
 //
 // Example:
 //
@@ -22,12 +29,21 @@
 //
 //	export EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT=true
 //	./api-server
+//
+// Example (with InfluxDB metrics):
+//
+//	export INFLUXDB_ENABLED=true
+//	export INFLUXDB_URL=https://influxdb.example.com
+//	export INFLUXDB_DATABASE=ec2metrics
+//	export INFLUXDB_JWT=your-jwt-token-here
+//	./api-server
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -50,6 +66,7 @@ type APIServerConfig struct {
 	CacheDir             string
 	Port                 string
 	SkipPricingCacheInit bool
+	Verbose              bool
 	InfluxDB             metrics.InfluxDBConfig
 }
 
@@ -107,6 +124,13 @@ func NewAPIServer(serverConfig APIServerConfig) (*APIServer, error) {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
+	// Validate that region is set
+	if cfg.Region == "" {
+		return nil, fmt.Errorf("AWS region must be configured. Set AWS_REGION or AWS_DEFAULT_REGION environment variable, or configure it in ~/.aws/config")
+	}
+
+	log.Printf("Using AWS region: %s", cfg.Region)
+
 	var expandedCacheDir string
 	if serverConfig.CacheTTL > 0 {
 		// Ensure cache directory exists only if caching is enabled
@@ -126,8 +150,14 @@ func NewAPIServer(serverConfig APIServerConfig) (*APIServer, error) {
 		return nil, fmt.Errorf("failed to create selector: %w", err)
 	}
 
-	// Enable detailed logging for the selector
-	instanceSelector.SetLogger(log.Default())
+	// Enable detailed logging for the selector if verbose mode is on
+	if serverConfig.Verbose {
+		log.Printf("Verbose logging enabled")
+		instanceSelector.SetLogger(log.Default())
+	} else {
+		// Disable verbose selector logs in normal mode
+		instanceSelector.SetLogger(log.New(io.Discard, "", 0))
+	}
 
 	// Initialize pricing caches
 	if !serverConfig.SkipPricingCacheInit {
@@ -177,6 +207,7 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req FilterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Error decoding JSON request: %v", err)
 		s.sendError(w, "Invalid JSON request", http.StatusBadRequest)
 		return
 	}
@@ -184,6 +215,7 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 	// Convert request to selector filters
 	filters, err := s.requestToFilters(req)
 	if err != nil {
+		log.Printf("Error converting request to filters: %v", err)
 		s.sendError(w, fmt.Sprintf("Invalid filter parameters: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -192,11 +224,14 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	start := time.Now()
 	instanceTypes, err := s.selector.FilterVerbose(ctx, filters)
 	if err != nil {
+		log.Printf("Filter execution failed: %v", err)
 		s.sendError(w, fmt.Sprintf("Filter execution failed: %v", err), http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Filter executed in %v, found %d instances", time.Since(start), len(instanceTypes))
 
 	// Record metrics if enabled
 	if s.metricsClient != nil {
@@ -242,6 +277,7 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 	// Convert request to selector filters
 	filters, err := s.requestToFilters(req)
 	if err != nil {
+		log.Printf("Error converting request to filters: %v", err)
 		s.sendError(w, fmt.Sprintf("Invalid filter parameters: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -250,11 +286,14 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	start := time.Now()
 	instanceTypes, err := s.selector.FilterVerbose(ctx, filters)
 	if err != nil {
+		log.Printf("Filter execution failed: %v", err)
 		s.sendError(w, fmt.Sprintf("Filter execution failed: %v", err), http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Filter executed in %v, found %d instances", time.Since(start), len(instanceTypes))
 
 	// Limit results if max_results is specified
 	maxResults := 20 // default
@@ -679,10 +718,12 @@ func parseConfig() APIServerConfig {
 		CacheDir:             getEnvString("EC2_INSTANCE_SELECTOR_CACHE_DIR", "~/.ec2-instance-selector/"),
 		Port:                 getEnvString("PORT", "8080"),
 		SkipPricingCacheInit: getEnvBool("EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT", false),
+		Verbose:              getEnvBool("EC2_INSTANCE_SELECTOR_VERBOSE", false),
 		InfluxDB: metrics.InfluxDBConfig{
 			Enabled:  getEnvBool("INFLUXDB_ENABLED", false),
 			URL:      getEnvString("INFLUXDB_URL", ""),
 			Database: getEnvString("INFLUXDB_DATABASE", ""),
+			JWT:      getEnvString("INFLUXDB_JWT", ""),
 		},
 	}
 }
@@ -696,6 +737,7 @@ func main() {
 	log.Printf("  Cache Directory (raw): %s", config.CacheDir)
 	log.Printf("  Port: %s", config.Port)
 	log.Printf("  Skip Pricing Cache Init: %t", config.SkipPricingCacheInit)
+	log.Printf("  Verbose Logging: %t", config.Verbose)
 
 	server, err := NewAPIServer(config)
 	if err != nil {
