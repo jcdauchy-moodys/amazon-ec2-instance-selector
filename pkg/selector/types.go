@@ -111,6 +111,215 @@ func (f *Filters) MarshalIndent(prefix, indent string) ([]byte, error) {
 	}, prefix, indent)
 }
 
+// MarshalIndentOnlySetFilters returns a JSON representation with only non-nil/non-zero filters.
+func (f *Filters) MarshalIndentOnlySetFilters(prefix, indent string) ([]byte, error) {
+	result := make(map[string]interface{})
+
+	if f.AvailabilityZones != nil && len(*f.AvailabilityZones) > 0 {
+		result["AvailabilityZones"] = *f.AvailabilityZones
+	}
+	if f.BareMetal != nil {
+		result["BareMetal"] = *f.BareMetal
+	}
+	if f.Burstable != nil {
+		result["Burstable"] = *f.Burstable
+	}
+	if f.AutoRecovery != nil {
+		result["AutoRecovery"] = *f.AutoRecovery
+	}
+	if f.FreeTier != nil {
+		result["FreeTier"] = *f.FreeTier
+	}
+	if f.CPUArchitecture != nil {
+		result["CPUArchitecture"] = string(*f.CPUArchitecture)
+	}
+	if f.CPUManufacturer != nil {
+		result["CPUManufacturer"] = string(*f.CPUManufacturer)
+	}
+	if f.CurrentGeneration != nil {
+		result["CurrentGeneration"] = *f.CurrentGeneration
+	}
+	if f.EnaSupport != nil {
+		result["EnaSupport"] = *f.EnaSupport
+	}
+	if f.EfaSupport != nil {
+		result["EfaSupport"] = *f.EfaSupport
+	}
+	if f.Fpga != nil {
+		result["Fpga"] = *f.Fpga
+	}
+	if f.GpusRange != nil {
+		result["GpusRange"] = map[string]interface{}{
+			"LowerBound": f.GpusRange.LowerBound,
+			"UpperBound": f.GpusRange.UpperBound,
+		}
+	}
+	if f.GpuMemoryRange != nil {
+		result["GpuMemoryRange"] = map[string]interface{}{
+			"LowerBound": f.GpuMemoryRange.LowerBound.Quantity,
+			"UpperBound": f.GpuMemoryRange.UpperBound.Quantity,
+		}
+	}
+	if f.GPUManufacturer != nil {
+		result["GPUManufacturer"] = *f.GPUManufacturer
+	}
+	if f.GPUModel != nil {
+		result["GPUModel"] = *f.GPUModel
+	}
+	if f.InferenceAcceleratorsRange != nil {
+		result["InferenceAcceleratorsRange"] = map[string]interface{}{
+			"LowerBound": f.InferenceAcceleratorsRange.LowerBound,
+			"UpperBound": f.InferenceAcceleratorsRange.UpperBound,
+		}
+	}
+	if f.InferenceAcceleratorManufacturer != nil {
+		result["InferenceAcceleratorManufacturer"] = *f.InferenceAcceleratorManufacturer
+	}
+	if f.InferenceAcceleratorModel != nil {
+		result["InferenceAcceleratorModel"] = *f.InferenceAcceleratorModel
+	}
+	if f.HibernationSupported != nil {
+		result["HibernationSupported"] = *f.HibernationSupported
+	}
+	if f.Hypervisor != nil {
+		result["Hypervisor"] = string(*f.Hypervisor)
+	}
+	if f.MaxResults != nil {
+		result["MaxResults"] = *f.MaxResults
+	}
+	if f.MemoryRange != nil {
+		result["MemoryRange"] = map[string]interface{}{
+			"LowerBound": f.MemoryRange.LowerBound.Quantity,
+			"UpperBound": f.MemoryRange.UpperBound.Quantity,
+		}
+	}
+	if f.NetworkInterfaces != nil {
+		result["NetworkInterfaces"] = map[string]interface{}{
+			"LowerBound": f.NetworkInterfaces.LowerBound,
+			"UpperBound": f.NetworkInterfaces.UpperBound,
+		}
+	}
+	if f.NetworkPerformance != nil {
+		result["NetworkPerformance"] = map[string]interface{}{
+			"LowerBound": f.NetworkPerformance.LowerBound,
+			"UpperBound": f.NetworkPerformance.UpperBound,
+		}
+	}
+	if f.NetworkEncryption != nil {
+		result["NetworkEncryption"] = *f.NetworkEncryption
+	}
+	if f.IPv6 != nil {
+		result["IPv6"] = *f.IPv6
+	}
+	if f.PlacementGroupStrategy != nil {
+		result["PlacementGroupStrategy"] = *f.PlacementGroupStrategy
+	}
+	if f.Region != nil {
+		result["Region"] = *f.Region
+	}
+	if f.RootDeviceType != nil {
+		result["RootDeviceType"] = string(*f.RootDeviceType)
+	}
+	if f.UsageClass != nil {
+		result["UsageClass"] = string(*f.UsageClass)
+	}
+	if f.VCpusRange != nil {
+		result["VCpusRange"] = map[string]interface{}{
+			"LowerBound": f.VCpusRange.LowerBound,
+			"UpperBound": f.VCpusRange.UpperBound,
+		}
+	}
+	if f.VCpusToMemoryRatio != nil {
+		result["VCpusToMemoryRatio"] = *f.VCpusToMemoryRatio
+	}
+	if f.MemoryPerCpuRange != nil {
+		result["MemoryPerCpuRange"] = map[string]interface{}{
+			"LowerBound": f.MemoryPerCpuRange.LowerBound,
+			"UpperBound": f.MemoryPerCpuRange.UpperBound,
+		}
+	}
+	if f.AllowList != nil {
+		result["AllowList"] = f.AllowList.String()
+	}
+	if f.DenyList != nil {
+		result["DenyList"] = f.DenyList.String()
+	}
+	if f.InstanceTypeBase != nil {
+		result["InstanceTypeBase"] = *f.InstanceTypeBase
+	}
+	if f.Flexible != nil {
+		result["Flexible"] = *f.Flexible
+	}
+	if f.Service != nil {
+		result["Service"] = *f.Service
+	}
+	if f.InstanceTypes != nil && len(*f.InstanceTypes) > 0 {
+		result["InstanceTypes"] = *f.InstanceTypes
+	}
+	if f.VirtualizationType != nil {
+		result["VirtualizationType"] = string(*f.VirtualizationType)
+	}
+	if f.PricePerHour != nil {
+		result["PricePerHour"] = map[string]interface{}{
+			"LowerBound": f.PricePerHour.LowerBound,
+			"UpperBound": f.PricePerHour.UpperBound,
+		}
+	}
+	if f.InstanceStorageRange != nil {
+		result["InstanceStorageRange"] = map[string]interface{}{
+			"LowerBound": f.InstanceStorageRange.LowerBound.Quantity,
+			"UpperBound": f.InstanceStorageRange.UpperBound.Quantity,
+		}
+	}
+	if f.NVMEInstanceStorageRange != nil {
+		result["NVMEInstanceStorageRange"] = map[string]interface{}{
+			"LowerBound": f.NVMEInstanceStorageRange.LowerBound.Quantity,
+			"UpperBound": f.NVMEInstanceStorageRange.UpperBound.Quantity,
+		}
+	}
+	if f.DiskType != nil {
+		result["DiskType"] = *f.DiskType
+	}
+	if f.NVME != nil {
+		result["NVME"] = *f.NVME
+	}
+	if f.EBSOptimized != nil {
+		result["EBSOptimized"] = *f.EBSOptimized
+	}
+	if f.DiskEncryption != nil {
+		result["DiskEncryption"] = *f.DiskEncryption
+	}
+	if f.EBSOptimizedBaselineBandwidth != nil {
+		result["EBSOptimizedBaselineBandwidth"] = map[string]interface{}{
+			"LowerBound": f.EBSOptimizedBaselineBandwidth.LowerBound.Quantity,
+			"UpperBound": f.EBSOptimizedBaselineBandwidth.UpperBound.Quantity,
+		}
+	}
+	if f.EBSOptimizedBaselineThroughput != nil {
+		result["EBSOptimizedBaselineThroughput"] = map[string]interface{}{
+			"LowerBound": f.EBSOptimizedBaselineThroughput.LowerBound.Quantity,
+			"UpperBound": f.EBSOptimizedBaselineThroughput.UpperBound.Quantity,
+		}
+	}
+	if f.EBSOptimizedBaselineIOPS != nil {
+		result["EBSOptimizedBaselineIOPS"] = map[string]interface{}{
+			"LowerBound": f.EBSOptimizedBaselineIOPS.LowerBound,
+			"UpperBound": f.EBSOptimizedBaselineIOPS.UpperBound,
+		}
+	}
+	if f.DedicatedHosts != nil {
+		result["DedicatedHosts"] = *f.DedicatedHosts
+	}
+	if f.Generation != nil {
+		result["Generation"] = map[string]interface{}{
+			"LowerBound": f.Generation.LowerBound,
+			"UpperBound": f.Generation.UpperBound,
+		}
+	}
+
+	return json.MarshalIndent(result, prefix, indent)
+}
+
 // Filters is used to group instance type resource attributes for filtering.
 type Filters struct {
 	// AvailabilityZones is the AWS Availability Zones where instances will be provisioned.

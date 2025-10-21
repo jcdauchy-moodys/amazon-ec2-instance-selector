@@ -402,6 +402,7 @@ func sortInstanceTypeInfo(instanceTypeInfoSlice []*instancetypes.Details) []*ins
 func (s Selector) executeFilters(ctx context.Context, filterToInstanceSpecMapping map[string]filterPair, instanceType ec2types.InstanceType) (bool, error) {
 	verdict := make(chan bool, len(filterToInstanceSpecMapping)+1)
 	errs := make(chan error, len(filterToInstanceSpecMapping))
+	rejectionReasons := make(chan string, len(filterToInstanceSpecMapping))
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
@@ -418,6 +419,8 @@ func (s Selector) executeFilters(ctx context.Context, filterToInstanceSpecMappin
 					errs <- err
 				}
 				if !ok {
+					reason := formatRejectionReason(instanceType, filterName, filter)
+					rejectionReasons <- reason
 					verdict <- false
 				}
 			}
@@ -432,6 +435,24 @@ func (s Selector) executeFilters(ctx context.Context, filterToInstanceSpecMappin
 		return true, nil
 	}
 	cancel()
+
+	// Collect rejection reasons for logging
+	var reasons []string
+	for {
+		select {
+		case reason := <-rejectionReasons:
+			reasons = append(reasons, reason)
+		default:
+			goto doneCollecting
+		}
+	}
+doneCollecting:
+
+	// Log rejection reasons if logger is enabled
+	if len(reasons) > 0 && s.Logger != nil {
+		s.Logger.Printf("Instance %s filtered out: %s", instanceType, strings.Join(reasons, "; "))
+	}
+
 	var err error
 	for {
 		select {
@@ -441,6 +462,147 @@ func (s Selector) executeFilters(ctx context.Context, filterToInstanceSpecMappin
 			return false, err
 		}
 	}
+}
+
+// formatRejectionReason creates a human-readable message explaining why an instance was filtered out
+func formatRejectionReason(instanceType ec2types.InstanceType, filterName string, filter filterPair) string {
+	filterVal := filter.filterValue
+	instanceSpec := filter.instanceSpec
+
+	// Format the filter value for display
+	var filterDisplay string
+	var instanceDisplay string
+
+	switch fv := filterVal.(type) {
+	case *string:
+		if fv != nil {
+			filterDisplay = fmt.Sprintf("'%s'", *fv)
+		}
+		switch is := instanceSpec.(type) {
+		case *string:
+			if is != nil {
+				instanceDisplay = fmt.Sprintf("'%s'", *is)
+			} else {
+				instanceDisplay = "nil"
+			}
+		case []*string:
+			if len(is) > 0 {
+				var vals []string
+				for _, s := range is {
+					if s != nil {
+						vals = append(vals, *s)
+					}
+				}
+				instanceDisplay = fmt.Sprintf("[%s]", strings.Join(vals, ", "))
+			} else {
+				instanceDisplay = "[]"
+			}
+		}
+	case *bool:
+		if fv != nil {
+			filterDisplay = fmt.Sprintf("%t", *fv)
+		}
+		if is, ok := instanceSpec.(*bool); ok && is != nil {
+			instanceDisplay = fmt.Sprintf("%t", *is)
+		} else {
+			instanceDisplay = "nil"
+		}
+	case *IntRangeFilter:
+		if fv.UpperBound > 0 {
+			filterDisplay = fmt.Sprintf("%d-%d", fv.LowerBound, fv.UpperBound)
+		} else {
+			filterDisplay = fmt.Sprintf(">=%d", fv.LowerBound)
+		}
+		switch is := instanceSpec.(type) {
+		case *int64:
+			if is != nil {
+				instanceDisplay = fmt.Sprintf("%d", *is)
+			} else {
+				instanceDisplay = "0"
+			}
+		case *int32:
+			if is != nil {
+				instanceDisplay = fmt.Sprintf("%d", *is)
+			} else {
+				instanceDisplay = "0"
+			}
+		case *int:
+			if is != nil {
+				instanceDisplay = fmt.Sprintf("%d", *is)
+			} else {
+				instanceDisplay = "0"
+			}
+		}
+	case *Int32RangeFilter:
+		if fv.UpperBound > 0 {
+			filterDisplay = fmt.Sprintf("%d-%d", fv.LowerBound, fv.UpperBound)
+		} else {
+			filterDisplay = fmt.Sprintf(">=%d", fv.LowerBound)
+		}
+		if is, ok := instanceSpec.(*int32); ok && is != nil {
+			instanceDisplay = fmt.Sprintf("%d", *is)
+		} else {
+			instanceDisplay = "0"
+		}
+	case *Uint64RangeFilter:
+		if fv.UpperBound > 0 {
+			filterDisplay = fmt.Sprintf("%d-%d", fv.LowerBound, fv.UpperBound)
+		} else {
+			filterDisplay = fmt.Sprintf(">=%d", fv.LowerBound)
+		}
+		if is, ok := instanceSpec.(*int64); ok && is != nil {
+			instanceDisplay = fmt.Sprintf("%d", *is)
+		} else {
+			instanceDisplay = "0"
+		}
+	case *ByteQuantityRangeFilter:
+		lowerGiB := float64(fv.LowerBound.Quantity) / 1024.0
+		if fv.UpperBound.Quantity > 0 {
+			upperGiB := float64(fv.UpperBound.Quantity) / 1024.0
+			filterDisplay = fmt.Sprintf("%.2f-%.2f GiB", lowerGiB, upperGiB)
+		} else {
+			filterDisplay = fmt.Sprintf(">=%.2f GiB", lowerGiB)
+		}
+		switch is := instanceSpec.(type) {
+		case *int64:
+			if is != nil {
+				instanceGiB := float64(*is) / 1024.0
+				instanceDisplay = fmt.Sprintf("%.2f GiB", instanceGiB)
+			} else {
+				instanceDisplay = "0 GiB"
+			}
+		case *int:
+			if is != nil {
+				instanceGiB := float64(*is) / 1024.0
+				instanceDisplay = fmt.Sprintf("%.2f GiB", instanceGiB)
+			} else {
+				instanceDisplay = "0 GiB"
+			}
+		}
+	case *Float64RangeFilter:
+		if fv.UpperBound > 0 {
+			filterDisplay = fmt.Sprintf("%.2f-%.2f", fv.LowerBound, fv.UpperBound)
+		} else {
+			filterDisplay = fmt.Sprintf(">=%.2f", fv.LowerBound)
+		}
+		if is, ok := instanceSpec.(*float64); ok && is != nil {
+			instanceDisplay = fmt.Sprintf("%.2f", *is)
+		} else {
+			instanceDisplay = "0"
+		}
+	case *regexp.Regexp:
+		filterDisplay = fmt.Sprintf("regex '%s'", fv.String())
+		if is, ok := instanceSpec.(*string); ok && is != nil {
+			instanceDisplay = fmt.Sprintf("'%s'", *is)
+		} else {
+			instanceDisplay = "nil"
+		}
+	default:
+		filterDisplay = fmt.Sprintf("%v", filterVal)
+		instanceDisplay = fmt.Sprintf("%v", instanceSpec)
+	}
+
+	return fmt.Sprintf("%s (required: %s, instance has: %s)", filterName, filterDisplay, instanceDisplay)
 }
 
 // exec executes a specific filterPair (user value & instance spec) with a specific instance type

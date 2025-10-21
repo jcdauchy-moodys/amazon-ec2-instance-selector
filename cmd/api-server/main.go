@@ -337,8 +337,8 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Format filters for logging
-	filtersJSON, _ := filters.MarshalIndent("", "  ")
+	// Format filters for logging (only non-nil filters)
+	filtersJSON, _ := filters.MarshalIndentOnlySetFilters("", "  ")
 	log.Printf("Filter executed in %v for region %s, found %d instances. Filters applied: %s", time.Since(start), queryRegion, len(instanceTypes), string(filtersJSON))
 
 	// Record metrics if enabled
@@ -415,8 +415,8 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Format filters for logging
-	filtersJSON, _ := filters.MarshalIndent("", "  ")
+	// Format filters for logging (only non-nil filters)
+	filtersJSON, _ := filters.MarshalIndentOnlySetFilters("", "  ")
 	log.Printf("Filter executed in %v for region %s, found %d instances. Filters applied: %s", time.Since(start), queryRegion, len(instanceTypes), string(filtersJSON))
 
 	// Record metrics if enabled
