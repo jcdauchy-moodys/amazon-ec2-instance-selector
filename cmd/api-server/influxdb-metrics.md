@@ -11,6 +11,19 @@ The API server can send EC2 instance metrics to InfluxDB v1.x using the followin
 
 When `INFLUXDB_JWT` is set, the server will include an `Authorization: Bearer <token>` header in all HTTP requests to InfluxDB.
 
+## Health Check
+
+On startup, the API server will test connectivity to InfluxDB by calling the `/health` endpoint. If the health check fails, a warning is logged but the server continues to run. This allows the application to start even if InfluxDB is temporarily unavailable.
+
+## Logging
+
+The following information is logged when InfluxDB metrics are enabled:
+
+- InfluxDB URL and database name on startup
+- JWT authentication status (enabled/disabled)
+- Health check results (OK or failure)
+- Number of metrics successfully written for each batch (e.g., "Successfully wrote 25 ec2_instances metrics to InfluxDB")
+
 ## Measurement Schema
 
 Measurement

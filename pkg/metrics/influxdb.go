@@ -1,7 +1,10 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -268,7 +271,10 @@ func (c *InfluxDBClient) RecordInstanceTypes(instances []*instancetypes.Details,
 
 	// Send data to InfluxDB
 	if len(lines) > 0 {
-		return c.sendData(strings.Join(lines, "\n"))
+		if err := c.sendData(strings.Join(lines, "\n")); err != nil {
+			return err
+		}
+		log.Printf("Successfully wrote %d ec2_instances metrics to InfluxDB", len(lines))
 	}
 
 	return nil
@@ -300,6 +306,40 @@ func (c *InfluxDBClient) sendData(data string) error {
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("failed to write metrics, status code: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// TestConnection tests the connection to InfluxDB by checking the /health endpoint
+func (c *InfluxDBClient) TestConnection(ctx context.Context) error {
+	if !c.config.Enabled {
+		return nil
+	}
+
+	healthURL := fmt.Sprintf("%s/health", strings.TrimRight(c.config.URL, "/"))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", healthURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create health check request: %w", err)
+	}
+
+	// Add Authorization Bearer header if JWT is configured
+	if c.config.JWT != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.config.JWT))
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to reach InfluxDB health endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body for better error messages
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("InfluxDB health check failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	return nil

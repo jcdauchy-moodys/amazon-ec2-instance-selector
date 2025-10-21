@@ -176,6 +176,19 @@ func NewAPIServer(serverConfig APIServerConfig) (*APIServer, error) {
 			return nil, fmt.Errorf("failed to create InfluxDB client: %w", err)
 		}
 		log.Printf("InfluxDB metrics collection enabled")
+		log.Printf("InfluxDB URL: %s", serverConfig.InfluxDB.URL)
+		log.Printf("InfluxDB Database: %s", serverConfig.InfluxDB.Database)
+		if serverConfig.InfluxDB.JWT != "" {
+			log.Printf("InfluxDB JWT authentication: enabled")
+		}
+
+		// Test InfluxDB connectivity
+		if err := metricsClient.TestConnection(ctx); err != nil {
+			log.Printf("Warning: InfluxDB health check failed: %v", err)
+			log.Printf("Metrics collection will continue, but writes may fail")
+		} else {
+			log.Printf("InfluxDB health check: OK")
+		}
 	}
 
 	return &APIServer{
