@@ -336,7 +336,10 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 		s.sendError(w, fmt.Sprintf("Filter execution failed: %v", err), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Filter executed in %v for region %s, found %d instances", time.Since(start), queryRegion, len(instanceTypes))
+
+	// Format filters for logging
+	filtersJSON, _ := filters.MarshalIndent("", "  ")
+	log.Printf("Filter executed in %v for region %s, found %d instances. Filters applied: %s", time.Since(start), queryRegion, len(instanceTypes), string(filtersJSON))
 
 	// Record metrics if enabled
 	if s.metricsClient != nil {
@@ -411,7 +414,10 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 		s.sendError(w, fmt.Sprintf("Filter execution failed: %v", err), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Filter executed in %v for region %s, found %d instances", time.Since(start), queryRegion, len(instanceTypes))
+
+	// Format filters for logging
+	filtersJSON, _ := filters.MarshalIndent("", "  ")
+	log.Printf("Filter executed in %v for region %s, found %d instances. Filters applied: %s", time.Since(start), queryRegion, len(instanceTypes), string(filtersJSON))
 
 	// Record metrics if enabled
 	if s.metricsClient != nil {
