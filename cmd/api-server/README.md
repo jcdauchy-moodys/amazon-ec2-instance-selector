@@ -106,6 +106,8 @@ GET /api/v1/instances?vcpus=4&memory=8gb&cpu_architecture=x86_64
 - `gpus_min` - Minimum GPUs
 - `gpus_max` - Maximum GPUs
 - `network_performance` - Network performance in Gbps
+- `sort_by` - Field to sort by (see Sorting section below)
+- `sort_direction` - Sort direction: "ascending", "asc", "descending", "desc" (default: "ascending")
 
 ### Filter Instances (POST)
 ```
@@ -317,6 +319,27 @@ curl -X POST http://localhost:8080/api/v1/instances/filter \
   }'
 ```
 
+### Example 8: Sort results to find best value instances
+
+```bash
+# Find 5 cheapest current-generation instances with at least 4 vCPUs
+curl "http://localhost:8080/api/v1/instances?vcpus_min=4&current_generation=true&sort_by=on-demand-price&sort_direction=asc&max_results=5"
+
+# Find instances with best memory-per-vCPU ratio (memory-optimized)
+curl "http://localhost:8080/api/v1/instances?vcpus_min=4&current_generation=true&sort_by=memory-per-cpu&sort_direction=desc&max_results=10"
+
+# Find cheapest GPU instances sorted by spot price
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "gpus_min": 1,
+    "current_generation": true,
+    "sort_by": "spot-price",
+    "sort_direction": "ascending",
+    "max_results": 5
+  }'
+```
+
 ## Response Format
 
 All successful responses follow this format:
@@ -337,6 +360,81 @@ Error responses:
   "message": "Invalid filter parameters: invalid memory format",
   "count": 0
 }
+```
+
+## Sorting Results
+
+Results can be sorted by various fields before applying the `max_results` limit. This allows you to get the top N instances based on specific criteria.
+
+### Sort Parameters
+
+- `sort_by` - The field to sort by (see available fields below)
+- `sort_direction` - Direction: `ascending`, `asc`, `descending`, `desc` (default: `ascending`)
+
+### Available Sort Fields
+
+**Shorthand fields:**
+- `vcpus` - Number of vCPUs
+- `memory` - Memory size in MiB
+- `memory-per-cpu` - Memory per vCPU ratio (GiB per vCPU)
+- `gpus` - Number of GPUs
+- `gpu-memory-total` - Total GPU memory
+- `network-interfaces` - Maximum network interfaces
+- `spot-price` - Spot price (30-day average)
+- `on-demand-price` - On-demand price per hour
+- `instance-storage` - Total instance storage in GB
+- `ebs-optimized-baseline-bandwidth` - EBS bandwidth in Mbps
+- `ebs-optimized-baseline-throughput` - EBS throughput in MBps
+- `ebs-optimized-baseline-iops` - EBS baseline IOPS
+- `inference-accelerators` - Number of inference accelerators
+
+**JSON paths:** You can also use JSON paths to sort by any field in the instance details (e.g., `.MemoryInfo.SizeInMiB`, `.NetworkInfo.NetworkPerformance`)
+
+### Sorting Examples
+
+**Example 1: Find cheapest on-demand instances**
+```bash
+curl "http://localhost:8080/api/v1/instances?vcpus_min=2&current_generation=true&sort_by=on-demand-price&sort_direction=asc&max_results=5"
+```
+
+**Example 2: Find largest memory instances**
+```bash
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "current_generation": true,
+    "sort_by": "memory",
+    "sort_direction": "desc",
+    "max_results": 10
+  }'
+```
+
+**Example 3: Find most cost-effective GPU instances**
+```bash
+curl "http://localhost:8080/api/v1/instances?gpus_min=1&sort_by=spot-price&sort_direction=asc&max_results=5"
+```
+
+**Example 4: Find instances with best memory-per-vCPU ratio**
+```bash
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "vcpus_min": 4,
+    "current_generation": true,
+    "sort_by": "memory-per-cpu",
+    "sort_direction": "descending",
+    "max_results": 10
+  }'
+```
+
+**Example 5: Find instances with most vCPUs**
+```bash
+curl "http://localhost:8080/api/v1/instances?current_generation=true&sort_by=vcpus&sort_direction=desc&max_results=10"
+```
+
+**Example 6: Find cheapest instances with NVMe storage**
+```bash
+curl "http://localhost:8080/api/v1/instances?nvme=true&sort_by=on-demand-price&sort_direction=asc&max_results=10"
 ```
 
 ## Memory Format

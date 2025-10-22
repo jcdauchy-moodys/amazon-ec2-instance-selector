@@ -61,6 +61,7 @@ import (
 	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/instancetypes"
 	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/metrics"
 	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/selector"
+	"github.com/aws/amazon-ec2-instance-selector/v3/pkg/sorter"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
@@ -123,6 +124,8 @@ type FilterRequest struct {
 	PricePerHour           *float64 `json:"price_per_hour,omitempty"`
 	PricePerHourMin        *float64 `json:"price_per_hour_min,omitempty"`
 	PricePerHourMax        *float64 `json:"price_per_hour_max,omitempty"`
+	SortBy                 *string  `json:"sort_by,omitempty"`
+	SortDirection          *string  `json:"sort_direction,omitempty"`
 }
 
 type APIResponse struct {
@@ -554,6 +557,23 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Sort results if sort_by is specified
+	if req.SortBy != nil && *req.SortBy != "" {
+		sortDirection := "ascending" // default
+		if req.SortDirection != nil && *req.SortDirection != "" {
+			sortDirection = *req.SortDirection
+		}
+
+		sortedInstanceTypes, err := sorter.Sort(instanceTypes, *req.SortBy, sortDirection)
+		if err != nil {
+			log.Printf("Failed to sort instance types: %v", err)
+			s.sendError(w, fmt.Sprintf("Failed to sort results: %v", err), http.StatusBadRequest)
+			return
+		}
+		instanceTypes = sortedInstanceTypes
+		log.Printf("Sorted %d instances by %s (%s)", len(instanceTypes), *req.SortBy, sortDirection)
+	}
+
 	// Limit results if max_results is specified
 	maxResults := 20 // default
 	if req.MaxResults != nil {
@@ -636,6 +656,23 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 		if err := s.metricsClient.RecordInstanceTypes(instanceTypes, queryRegion); err != nil {
 			log.Printf("Warning: failed to record metrics: %v", err)
 		}
+	}
+
+	// Sort results if sort_by is specified
+	if req.SortBy != nil && *req.SortBy != "" {
+		sortDirection := "ascending" // default
+		if req.SortDirection != nil && *req.SortDirection != "" {
+			sortDirection = *req.SortDirection
+		}
+
+		sortedInstanceTypes, err := sorter.Sort(instanceTypes, *req.SortBy, sortDirection)
+		if err != nil {
+			log.Printf("Failed to sort instance types: %v", err)
+			s.sendError(w, fmt.Sprintf("Failed to sort results: %v", err), http.StatusBadRequest)
+			return
+		}
+		instanceTypes = sortedInstanceTypes
+		log.Printf("Sorted %d instances by %s (%s)", len(instanceTypes), *req.SortBy, sortDirection)
 	}
 
 	// Limit results if max_results is specified
@@ -847,6 +884,14 @@ func (s *APIServer) parseQueryParams(r *http.Request) FilterRequest {
 		if v, err := strconv.ParseFloat(pricePerHourMax, 64); err == nil {
 			req.PricePerHourMax = &v
 		}
+	}
+
+	if sortBy := r.URL.Query().Get("sort_by"); sortBy != "" {
+		req.SortBy = &sortBy
+	}
+
+	if sortDirection := r.URL.Query().Get("sort_direction"); sortDirection != "" {
+		req.SortDirection = &sortDirection
 	}
 
 	return req
