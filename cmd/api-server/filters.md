@@ -24,6 +24,7 @@ The following filters are currently available through the API endpoints (`GET /a
 | `memory_max` | string | Maximum memory | `"32gb"` |
 | `memory_per_cpu_min` | float | Minimum memory per vCPU ratio (GiB per vCPU) | `2.0` |
 | `memory_per_cpu_max` | float | Maximum memory per vCPU ratio (GiB per vCPU) | `8.0` |
+| `vcpus_to_memory_ratio` | float/string | Specific vCPUs to memory ratio (memory GiB / vCPU). Accepts ratio format `"1:2"` or float `2.0` | `"1:2"`, `2.0`, `"1:4"`, `4.0` |
 
 **Memory Format Examples:**
 - `"4gb"` or `"4 GB"`
@@ -35,6 +36,12 @@ The following filters are currently available through the API endpoints (`GET /a
 - **Compute-optimized** instances: `1-2 GiB per vCPU`
 - **General-purpose** instances: `3-4 GiB per vCPU`
 - **Memory-optimized** instances: `8+ GiB per vCPU`
+
+**VCPUs-to-Memory-Ratio Format:**
+- Ratio format: `"1:2"` means 1 vCPU to 2 GiB memory (ratio = 2.0)
+- Ratio format: `"1:4"` means 1 vCPU to 4 GiB memory (ratio = 4.0)
+- Float format: `2.0` means 2 GiB memory per vCPU
+- Float format: `4.0` means 4 GiB memory per vCPU
 
 ### GPU Filters
 
@@ -134,6 +141,18 @@ The following filters are currently available through the API endpoints (`GET /a
 curl "http://localhost:8080/api/v1/instances?vcpus_min=4&memory_min=8gb&current_generation=true&max_results=10"
 ```
 
+### GET Request - vCPUs to Memory Ratio filtering
+```bash
+# Find instances with a 1:4 ratio (4 GiB per vCPU) - typical for memory-optimized
+curl "http://localhost:8080/api/v1/instances?vcpus_to_memory_ratio=1:4&current_generation=true&max_results=10"
+
+# Same as above using float notation
+curl "http://localhost:8080/api/v1/instances?vcpus_to_memory_ratio=4.0&current_generation=true&max_results=10"
+
+# Find instances with 1:2 ratio (2 GiB per vCPU) - typical for compute-optimized
+curl "http://localhost:8080/api/v1/instances?vcpus_to_memory_ratio=1:2&current_generation=true&max_results=10"
+```
+
 ### GET Request - NVMe storage filtering
 ```bash
 # Find i3 family instances with at least 1TB of NVMe storage
@@ -173,6 +192,20 @@ curl -X POST http://localhost:8080/api/v1/instances/filter \
     "nvme": true,
     "allow_list": "m[5-6].*",
     "max_results": 10
+  }'
+```
+
+### POST Request - vCPUs to Memory Ratio filtering
+```bash
+# Find memory-optimized instances with 1:8 ratio (8 GiB per vCPU)
+curl -X POST http://localhost:8080/api/v1/instances/filter \
+  -H "Content-Type: application/json" \
+  -d '{
+    "vcpus_to_memory_ratio": 4.0,
+    "vcpus_min": 4,
+    "current_generation": true,
+    "cpu_architecture": "x86_64",
+    "max_results": 20
   }'
 ```
 
@@ -224,9 +257,6 @@ The underlying `selector.Filters` struct supports additional filters that are no
 - `cpu_manufacturer` - CPU manufacturer filter
 - `hypervisor` - Hypervisor type (e.g., xen, nitro)
 - `virtualization_type` - Virtualization type (e.g., hvm, paravirtual)
-
-### Memory & Performance
-- `vcpus_to_memory_ratio` - Specific vCPUs to memory ratio
 
 ### GPU & Accelerators
 - `gpu_memory_range` - GPU memory range filter

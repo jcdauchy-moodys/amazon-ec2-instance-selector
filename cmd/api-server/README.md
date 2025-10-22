@@ -48,6 +48,31 @@ Returns server health status:
 }
 ```
 
+### Readiness Probe
+```
+GET /ready
+```
+
+Returns readiness status (for Kubernetes probes). Returns HTTP 200 when pricing data is available, HTTP 503 otherwise:
+
+**Ready (HTTP 200):**
+```json
+{
+  "status": "ready",
+  "version": "1.0.0"
+}
+```
+
+**Not Ready (HTTP 503):**
+```json
+{
+  "status": "not ready - pricing data not yet available",
+  "version": "1.0.0"
+}
+```
+
+This endpoint is intended for Kubernetes readiness probes and will only return success once the pricing caches have been initialized.
+
 ### Filter Instances (GET)
 ```
 GET /api/v1/instances?vcpus=4&memory=8gb&cpu_architecture=x86_64
@@ -741,10 +766,16 @@ export INFLUXDB_JWT="your-jwt-token-here"  # Optional, for authenticated InfluxD
 ### GET /health
 Health check endpoint.
 
+### GET /ready
+Readiness probe endpoint. Returns HTTP 200 when pricing data is available, HTTP 503 otherwise.
+
 ### GET /api/v1/instances
 Filter instances using query parameters.
 
 ### POST /api/v1/instances/filter
 Filter instances using JSON request body.
+
+### GET /api/v1/instances/price
+Get pricing information for a specific instance type.
 
 For detailed API documentation and examples, see the examples.sh file.

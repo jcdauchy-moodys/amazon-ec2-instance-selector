@@ -99,6 +99,7 @@ type FilterRequest struct {
 	MemoryMax              *string  `json:"memory_max,omitempty"`
 	MemoryPerCpuMin        *float64 `json:"memory_per_cpu_min,omitempty"`
 	MemoryPerCpuMax        *float64 `json:"memory_per_cpu_max,omitempty"`
+	VCpusToMemoryRatio     *float64 `json:"vcpus_to_memory_ratio,omitempty"`
 	CPUArchitecture        *string  `json:"cpu_architecture,omitempty"`
 	InstanceTypes          []string `json:"instance_types,omitempty"`
 	AllowList              *string  `json:"allow_list,omitempty"`
@@ -706,6 +707,27 @@ func (s *APIServer) parseQueryParams(r *http.Request) FilterRequest {
 		}
 	}
 
+	// Parse vcpus_to_memory_ratio - supports both float (e.g., "0.5") and ratio format (e.g., "1:2")
+	if vcpusToMemoryRatio := r.URL.Query().Get("vcpus_to_memory_ratio"); vcpusToMemoryRatio != "" {
+		// Try to parse as ratio first (e.g., "1:2")
+		if strings.Contains(vcpusToMemoryRatio, ":") {
+			parts := strings.Split(vcpusToMemoryRatio, ":")
+			if len(parts) == 2 {
+				vcpus, err1 := strconv.ParseFloat(parts[0], 64)
+				memory, err2 := strconv.ParseFloat(parts[1], 64)
+				if err1 == nil && err2 == nil && vcpus > 0 {
+					ratio := memory / vcpus
+					req.VCpusToMemoryRatio = &ratio
+				}
+			}
+		} else {
+			// Parse as direct float value
+			if v, err := strconv.ParseFloat(vcpusToMemoryRatio, 64); err == nil {
+				req.VCpusToMemoryRatio = &v
+			}
+		}
+	}
+
 	if arch := r.URL.Query().Get("cpu_architecture"); arch != "" {
 		req.CPUArchitecture = &arch
 	}
@@ -889,6 +911,11 @@ func (s *APIServer) requestToFilters(req FilterRequest) (selector.Filters, error
 			rangeFilter.UpperBound = *req.MemoryPerCpuMax
 		}
 		filters.MemoryPerCpuRange = rangeFilter
+	}
+
+	// VCPUs to Memory Ratio
+	if req.VCpusToMemoryRatio != nil {
+		filters.VCpusToMemoryRatio = req.VCpusToMemoryRatio
 	}
 
 	// CPU Architecture
