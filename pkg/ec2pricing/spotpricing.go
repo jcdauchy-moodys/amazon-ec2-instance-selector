@@ -164,6 +164,11 @@ func (c *SpotPricing) Get(ctx context.Context, instanceType ec2types.InstanceTyp
 	return c.calculateSpotAggregate(c.filterOn(zone, entries.([]*spotPricingEntry))), nil
 }
 
+// GetWithExpiration retrieves spot pricing entries from cache along with expiration time.
+func (c *SpotPricing) GetWithExpiration(instanceType string) (interface{}, time.Time, bool) {
+	return c.cache.GetWithExpiration(instanceType)
+}
+
 func (c *SpotPricing) contains(zone string, entries []*spotPricingEntry) bool {
 	for _, entry := range entries {
 		if entry.Zone == zone {

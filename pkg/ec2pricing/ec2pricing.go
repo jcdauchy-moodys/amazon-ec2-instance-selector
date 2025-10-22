@@ -49,6 +49,10 @@ type EC2PricingIface interface {
 	SpotCacheCount() int
 	Save() error
 	SetLogger(*log.Logger)
+	GetOnDemandCacheMetadata(instanceType string) (interface{}, time.Time, bool)
+	GetSpotCacheMetadata(instanceType string) (interface{}, time.Time, bool)
+	GetOnDemandTTL() time.Duration
+	GetSpotTTL() time.Duration
 }
 
 // use us-east-1 since pricing only has endpoints in us-east-1 and ap-south-1
@@ -136,4 +140,24 @@ func (p *EC2Pricing) RefreshSpotCache(ctx context.Context, days int) error {
 
 func (p *EC2Pricing) Save() error {
 	return multierr.Append(p.ODPricing.Save(), p.SpotPricing.Save())
+}
+
+// GetOnDemandCacheMetadata retrieves cache metadata for an on-demand instance type.
+func (p *EC2Pricing) GetOnDemandCacheMetadata(instanceType string) (interface{}, time.Time, bool) {
+	return p.ODPricing.GetWithExpiration(instanceType)
+}
+
+// GetSpotCacheMetadata retrieves cache metadata for a spot instance type.
+func (p *EC2Pricing) GetSpotCacheMetadata(instanceType string) (interface{}, time.Time, bool) {
+	return p.SpotPricing.GetWithExpiration(instanceType)
+}
+
+// GetOnDemandTTL returns the on-demand pricing cache TTL.
+func (p *EC2Pricing) GetOnDemandTTL() time.Duration {
+	return p.ODPricing.FullRefreshTTL
+}
+
+// GetSpotTTL returns the spot pricing cache TTL.
+func (p *EC2Pricing) GetSpotTTL() time.Duration {
+	return p.SpotPricing.FullRefreshTTL
 }

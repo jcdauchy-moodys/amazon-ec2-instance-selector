@@ -180,6 +180,11 @@ func (c *OnDemandPricing) Get(ctx context.Context, instanceType ec2types.Instanc
 	return costs[string(instanceType)], nil
 }
 
+// GetWithExpiration retrieves a price from cache along with its expiration time.
+func (c *OnDemandPricing) GetWithExpiration(instanceType string) (interface{}, time.Time, bool) {
+	return c.cache.GetWithExpiration(instanceType)
+}
+
 // Count of items in the cache.
 func (c *OnDemandPricing) Count() int {
 	return c.cache.ItemCount()

@@ -134,6 +134,24 @@ type HealthResponse struct {
 	Version string `json:"version"`
 }
 
+type PriceRequest struct {
+	Region       string `json:"region"`
+	InstanceType string `json:"instance_type"`
+	UsageClass   string `json:"usage_class"` // "spot" or "on-demand"
+}
+
+type PriceResponse struct {
+	Success         bool      `json:"success"`
+	Message         string    `json:"message,omitempty"`
+	Region          string    `json:"region,omitempty"`
+	InstanceType    string    `json:"instance_type,omitempty"`
+	UsageClass      string    `json:"usage_class,omitempty"`
+	PricePerHour    float64   `json:"price_per_hour,omitempty"`
+	Currency        string    `json:"currency,omitempty"`
+	LastUpdated     time.Time `json:"last_updated,omitempty"`
+	CacheExpiration time.Time `json:"cache_expiration,omitempty"`
+}
+
 func NewAPIServer(serverConfig APIServerConfig) (*APIServer, error) {
 	ctx := context.Background()
 
@@ -287,6 +305,128 @@ func (s *APIServer) healthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (s *APIServer) priceHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse query parameters
+	region := r.URL.Query().Get("region")
+	instanceType := r.URL.Query().Get("instance_type")
+	usageClass := r.URL.Query().Get("usage_class")
+
+	// Validate required parameters
+	if instanceType == "" {
+		s.sendPriceError(w, "instance_type parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	// Default to on-demand if not specified
+	if usageClass == "" {
+		usageClass = "on-demand"
+	}
+
+	// Normalize usage class
+	usageClass = strings.ToLower(usageClass)
+	if usageClass != "on-demand" && usageClass != "spot" {
+		s.sendPriceError(w, "usage_class must be 'on-demand' or 'spot'", http.StatusBadRequest)
+		return
+	}
+
+	// Default to server's region if not specified
+	queryRegion := s.region
+	if region != "" {
+		queryRegion = region
+	}
+
+	// Get the appropriate selector for the region
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	regionSelector, err := s.getSelectorForRegion(ctx, queryRegion)
+	if err != nil {
+		log.Printf("Failed to get selector for region %s: %v", queryRegion, err)
+		s.sendPriceError(w, fmt.Sprintf("Failed to initialize for region %s: %v", queryRegion, err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get price from cache
+	var price float64
+	var lastUpdated time.Time
+	var cacheExpiration time.Time
+
+	ec2InstanceType := ec2types.InstanceType(instanceType)
+
+	if usageClass == "on-demand" {
+		// Get on-demand price
+		price, err = regionSelector.EC2Pricing.GetOnDemandInstanceTypeCost(ctx, ec2InstanceType)
+		if err != nil {
+			log.Printf("Failed to get on-demand price for %s in %s: %v", instanceType, queryRegion, err)
+			s.sendPriceError(w, fmt.Sprintf("Failed to retrieve pricing data: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Get cache metadata from on-demand pricing cache
+		if item, expiration, found := regionSelector.EC2Pricing.GetOnDemandCacheMetadata(instanceType); found {
+			// Calculate last updated time based on TTL
+			ttl := regionSelector.EC2Pricing.GetOnDemandTTL()
+			if ttl > 0 {
+				lastUpdated = expiration.Add(-ttl)
+				cacheExpiration = expiration
+			}
+			_ = item // item contains the price but we already have it
+		}
+	} else {
+		// Get spot price (30-day average)
+		price, err = regionSelector.EC2Pricing.GetSpotInstanceTypeNDayAvgCost(ctx, ec2InstanceType, nil, 30)
+		if err != nil {
+			log.Printf("Failed to get spot price for %s in %s: %v", instanceType, queryRegion, err)
+			s.sendPriceError(w, fmt.Sprintf("Failed to retrieve pricing data: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Get cache metadata from spot pricing cache
+		if item, expiration, found := regionSelector.EC2Pricing.GetSpotCacheMetadata(instanceType); found {
+			// Calculate last updated time based on TTL
+			ttl := regionSelector.EC2Pricing.GetSpotTTL()
+			if ttl > 0 {
+				lastUpdated = expiration.Add(-ttl)
+				cacheExpiration = expiration
+			}
+			_ = item // item contains the price entries but we already have the calculated price
+		}
+	}
+
+	// Build response
+	response := PriceResponse{
+		Success:         true,
+		Region:          queryRegion,
+		InstanceType:    instanceType,
+		UsageClass:      usageClass,
+		PricePerHour:    price,
+		Currency:        "USD",
+		LastUpdated:     lastUpdated,
+		CacheExpiration: cacheExpiration,
+	}
+
+	log.Printf("Retrieved %s price for %s in %s: $%.4f/hour", usageClass, instanceType, queryRegion, price)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (s *APIServer) sendPriceError(w http.ResponseWriter, message string, statusCode int) {
+	response := PriceResponse{
+		Success: false,
+		Message: message,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(response)
 }
 
@@ -957,6 +1097,7 @@ func main() {
 	// Setup routes
 	http.HandleFunc("/health", server.healthHandler)
 	http.HandleFunc("/api/v1/instances/filter", server.filterHandler)
+	http.HandleFunc("/api/v1/instances/price", server.priceHandler)
 	http.HandleFunc("/api/v1/instances", server.getHandler)
 
 	// Add CORS headers middleware
@@ -980,6 +1121,7 @@ func main() {
 	log.Printf("  GET  /health                     - Health check")
 	log.Printf("  GET  /api/v1/instances           - Filter instances via query params")
 	log.Printf("  POST /api/v1/instances/filter    - Filter instances via JSON body")
+	log.Printf("  GET  /api/v1/instances/price     - Get pricing for a specific instance type")
 
 	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatalf("Server failed to start: %v", err)

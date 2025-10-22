@@ -129,6 +129,47 @@ Content-Type: application/json
 }
 ```
 
+### Get Instance Price (GET)
+```
+GET /api/v1/instances/price?instance_type=m5.xlarge&region=us-east-1&usage_class=on-demand
+```
+
+Retrieves the latest cached pricing information for a specific instance type.
+
+**Query Parameters:**
+- `instance_type` (required) - The EC2 instance type (e.g., "m5.xlarge", "t3.medium")
+- `region` (optional) - AWS region (defaults to server's default region)
+- `usage_class` (optional) - Pricing type: "on-demand" or "spot" (default: "on-demand")
+
+**Response:**
+```json
+{
+  "success": true,
+  "region": "us-east-1",
+  "instance_type": "m5.xlarge",
+  "usage_class": "on-demand",
+  "price_per_hour": 0.192,
+  "currency": "USD",
+  "last_updated": "2025-10-22T10:30:00Z",
+  "cache_expiration": "2025-10-23T10:30:00Z"
+}
+```
+
+**Response Fields:**
+- `success` - Whether the request was successful
+- `region` - AWS region for the pricing data
+- `instance_type` - The requested instance type
+- `usage_class` - The pricing type (on-demand or spot)
+- `price_per_hour` - The price per hour in USD
+- `currency` - Currency code (always "USD")
+- `last_updated` - When the pricing data was last fetched/cached
+- `cache_expiration` - When the cached pricing data will expire
+
+**Notes:**
+- For spot pricing, the endpoint returns a 30-day average price
+- Pricing data is cached based on the `EC2_INSTANCE_SELECTOR_CACHE_TTL` setting (default: 24 hours)
+- If pricing data is not in cache, it will be fetched from AWS APIs
+
 ## Usage Examples
 
 ### Example 1: Find instances with 4 vCPUs and 8GB memory
@@ -197,7 +238,34 @@ curl -X POST http://localhost:8080/api/v1/instances/filter \
   }'
 ```
 
-### Example 6: Find instances with NVME storage support
+### Example 6: Get pricing for a specific instance type
+
+```bash
+# Get on-demand pricing for m5.xlarge in us-east-1
+curl "http://localhost:8080/api/v1/instances/price?instance_type=m5.xlarge&region=us-east-1&usage_class=on-demand"
+
+# Get spot pricing for t3.medium (uses default region)
+curl "http://localhost:8080/api/v1/instances/price?instance_type=t3.medium&usage_class=spot"
+
+# Get on-demand pricing for c5.2xlarge (defaults to on-demand if usage_class not specified)
+curl "http://localhost:8080/api/v1/instances/price?instance_type=c5.2xlarge"
+```
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "region": "us-east-1",
+  "instance_type": "m5.xlarge",
+  "usage_class": "on-demand",
+  "price_per_hour": 0.192,
+  "currency": "USD",
+  "last_updated": "2025-10-22T10:30:00Z",
+  "cache_expiration": "2025-10-23T10:30:00Z"
+}
+```
+
+### Example 7: Find instances with NVME storage support
 
 ```bash
 # Find instances that support NVME storage
