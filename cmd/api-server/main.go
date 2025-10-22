@@ -86,6 +86,8 @@ type APIServer struct {
 	cacheDir      string
 	verbose       bool
 	mu            sync.RWMutex // protects selectors map
+	ready         bool         // indicates if pricing data is available
+	readyMu       sync.RWMutex // protects ready flag
 }
 
 type FilterRequest struct {
@@ -196,22 +198,38 @@ func NewAPIServer(serverConfig APIServerConfig) (*APIServer, error) {
 		instanceSelector.SetLogger(log.New(io.Discard, "", 0))
 	}
 
+	apiServer := &APIServer{
+		baseConfig:    cfg,
+		selector:      instanceSelector,
+		selectors:     make(map[string]*selector.Selector),
+		metricsClient: nil, // Will be set later if InfluxDB is enabled
+		region:        cfg.Region,
+		cacheTTL:      serverConfig.CacheTTL,
+		cacheDir:      expandedCacheDir,
+		verbose:       serverConfig.Verbose,
+		ready:         false, // Not ready until pricing caches are initialized
+	}
+
 	// Initialize pricing caches
 	if !serverConfig.SkipPricingCacheInit {
 		if err := initializePricingCaches(ctx, instanceSelector, serverConfig.CacheTTL); err != nil {
 			return nil, fmt.Errorf("failed to initialize pricing caches: %w", err)
 		}
+		// Mark as ready after successful pricing cache initialization
+		apiServer.setReady(true)
+		log.Printf("API server is ready - pricing data available")
 	} else {
 		log.Printf("Skipping pricing cache initialization (SKIP_PRICING_CACHE_INIT=true)")
+		log.Printf("API server will not be ready until pricing data is loaded on first request")
 	}
 
 	// Initialize InfluxDB client if enabled
-	var metricsClient *metrics.InfluxDBClient
 	if serverConfig.InfluxDB.Enabled {
-		metricsClient, err = metrics.NewInfluxDBClient(serverConfig.InfluxDB)
+		metricsClient, err := metrics.NewInfluxDBClient(serverConfig.InfluxDB)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create InfluxDB client: %w", err)
 		}
+		apiServer.metricsClient = metricsClient
 		log.Printf("InfluxDB metrics collection enabled")
 		log.Printf("InfluxDB URL: %s", serverConfig.InfluxDB.URL)
 		log.Printf("InfluxDB Database: %s", serverConfig.InfluxDB.Database)
@@ -228,16 +246,7 @@ func NewAPIServer(serverConfig APIServerConfig) (*APIServer, error) {
 		}
 	}
 
-	return &APIServer{
-		baseConfig:    cfg,
-		selector:      instanceSelector,
-		selectors:     make(map[string]*selector.Selector),
-		metricsClient: metricsClient,
-		region:        cfg.Region,
-		cacheTTL:      serverConfig.CacheTTL,
-		cacheDir:      expandedCacheDir,
-		verbose:       serverConfig.Verbose,
-	}, nil
+	return apiServer, nil
 }
 
 // getSelectorForRegion returns a selector for the specified region.
@@ -293,6 +302,20 @@ func (s *APIServer) getSelectorForRegion(ctx context.Context, region string) (*s
 	return regionSelector, nil
 }
 
+// isReady returns whether the API server is ready to serve requests (pricing data is available).
+func (s *APIServer) isReady() bool {
+	s.readyMu.RLock()
+	defer s.readyMu.RUnlock()
+	return s.ready
+}
+
+// setReady sets the readiness state of the API server.
+func (s *APIServer) setReady(ready bool) {
+	s.readyMu.Lock()
+	defer s.readyMu.Unlock()
+	s.ready = ready
+}
+
 func (s *APIServer) healthHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -306,6 +329,33 @@ func (s *APIServer) healthHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// readyHandler returns 200 when pricing data is available, 503 otherwise.
+// This endpoint is intended for Kubernetes readiness probes.
+func (s *APIServer) readyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.isReady() {
+		response := HealthResponse{
+			Status:  "ready",
+			Version: "1.0.0",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+	} else {
+		response := HealthResponse{
+			Status:  "not ready - pricing data not yet available",
+			Version: "1.0.0",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(response)
+	}
 }
 
 func (s *APIServer) priceHandler(w http.ResponseWriter, r *http.Request) {
@@ -401,6 +451,12 @@ func (s *APIServer) priceHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Mark server as ready if this is the first successful pricing fetch
+	if !s.isReady() && (regionSelector.EC2Pricing.OnDemandCacheCount() > 0 || regionSelector.EC2Pricing.SpotCacheCount() > 0) {
+		s.setReady(true)
+		log.Printf("API server is now ready - pricing data available")
+	}
+
 	// Build response
 	response := PriceResponse{
 		Success:         true,
@@ -484,6 +540,12 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 	filtersJSON, _ := filters.MarshalIndentOnlySetFilters("", "  ")
 	log.Printf("Filter executed in %v for region %s, found %d instances. Filters applied: %s", time.Since(start), queryRegion, len(instanceTypes), string(filtersJSON))
 
+	// Mark server as ready if this is the first successful query with pricing data
+	if !s.isReady() && (regionSelector.EC2Pricing.OnDemandCacheCount() > 0 || regionSelector.EC2Pricing.SpotCacheCount() > 0) {
+		s.setReady(true)
+		log.Printf("API server is now ready - pricing data available")
+	}
+
 	// Record metrics if enabled
 	if s.metricsClient != nil {
 		if err := s.metricsClient.RecordInstanceTypes(instanceTypes, queryRegion); err != nil {
@@ -561,6 +623,12 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 	// Format filters for logging (only non-nil filters)
 	filtersJSON, _ := filters.MarshalIndentOnlySetFilters("", "  ")
 	log.Printf("Filter executed in %v for region %s, found %d instances. Filters applied: %s", time.Since(start), queryRegion, len(instanceTypes), string(filtersJSON))
+
+	// Mark server as ready if this is the first successful query with pricing data
+	if !s.isReady() && (regionSelector.EC2Pricing.OnDemandCacheCount() > 0 || regionSelector.EC2Pricing.SpotCacheCount() > 0) {
+		s.setReady(true)
+		log.Printf("API server is now ready - pricing data available")
+	}
 
 	// Record metrics if enabled
 	if s.metricsClient != nil {
@@ -1096,6 +1164,7 @@ func main() {
 
 	// Setup routes
 	http.HandleFunc("/health", server.healthHandler)
+	http.HandleFunc("/ready", server.readyHandler)
 	http.HandleFunc("/api/v1/instances/filter", server.filterHandler)
 	http.HandleFunc("/api/v1/instances/price", server.priceHandler)
 	http.HandleFunc("/api/v1/instances", server.getHandler)
@@ -1119,6 +1188,7 @@ func main() {
 	log.Printf("Listening on port %s", port)
 	log.Printf("Endpoints:")
 	log.Printf("  GET  /health                     - Health check")
+	log.Printf("  GET  /ready                      - Readiness probe (returns 200 when pricing data available)")
 	log.Printf("  GET  /api/v1/instances           - Filter instances via query params")
 	log.Printf("  POST /api/v1/instances/filter    - Filter instances via JSON body")
 	log.Printf("  GET  /api/v1/instances/price     - Get pricing for a specific instance type")
