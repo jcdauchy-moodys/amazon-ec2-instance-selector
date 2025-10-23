@@ -4,11 +4,11 @@
 //
 // Environment Variables:
 //
-//	EC2_INSTANCE_SELECTOR_CACHE_TTL - Cache time-to-live for pricing data (default: 24h)
+//	EC2_INSTANCE_SELECTOR_CACHE_TTL - Cache time-to-live for instance types and pricing data (default: 24h)
 //	                                   Examples: "1h", "30m", "24h", "0" (disables cache)
 //	EC2_INSTANCE_SELECTOR_CACHE_DIR - Directory for cache files (default: ~/.ec2-instance-selector/)
-//	EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT - Skip pricing cache initialization on startup (default: false)
-//	                                   Set to "true" for faster startup without pricing data
+//	EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT - Skip cache initialization on startup (default: false)
+//	                                   Set to "true" for faster startup without pre-loading instance types and pricing data
 //	EC2_INSTANCE_SELECTOR_FILTER_CACHE_TTL - Cache time-to-live for filter results (default: 5m)
 //	                                   Caches the results of filter queries based on input parameters + region
 //	                                   Examples: "1m", "5m", "1h", "0" (disables filter cache)
@@ -32,7 +32,7 @@
 //	export PORT=3000
 //	./api-server
 //
-// Example (fast startup without pricing):
+// Example (fast startup without pre-loading caches):
 //
 //	export EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT=true
 //	./api-server
@@ -43,6 +43,11 @@
 //	export INFLUXDB_URL=https://influxdb.example.com
 //	export INFLUXDB_DATABASE=ec2metrics
 //	export INFLUXDB_JWT=your-jwt-token-here
+//	./api-server
+//
+// Example (with filter cache):
+//
+//	export EC2_INSTANCE_SELECTOR_FILTER_CACHE_TTL=10m
 //	./api-server
 package main
 
@@ -178,6 +183,7 @@ type APIServer struct {
 	cacheTTL      time.Duration
 	cacheDir      string
 	verbose       bool
+	skipCacheInit bool         // whether to skip cache initialization for new regions
 	mu            sync.RWMutex // protects selectors map
 	ready         bool         // indicates if pricing data is available
 	readyMu       sync.RWMutex // protects ready flag
@@ -362,20 +368,21 @@ func NewAPIServer(serverConfig APIServerConfig) (*APIServer, error) {
 		cacheTTL:      serverConfig.CacheTTL,
 		cacheDir:      expandedCacheDir,
 		verbose:       serverConfig.Verbose,
-		ready:         false, // Not ready until pricing caches are initialized
+		skipCacheInit: serverConfig.SkipPricingCacheInit,
+		ready:         false, // Not ready until caches are initialized
 	}
 
-	// Initialize pricing caches
+	// Initialize caches
 	if !serverConfig.SkipPricingCacheInit {
-		if err := initializePricingCaches(ctx, instanceSelector, serverConfig.CacheTTL); err != nil {
-			return nil, fmt.Errorf("failed to initialize pricing caches: %w", err)
+		if err := initializeCachesForSelector(ctx, instanceSelector, serverConfig.CacheTTL); err != nil {
+			return nil, fmt.Errorf("failed to initialize caches: %w", err)
 		}
-		// Mark as ready after successful pricing cache initialization
+		// Mark as ready after successful cache initialization
 		apiServer.setReady(true)
-		log.Printf("API server is ready - pricing data available")
+		log.Printf("API server is ready - instance types and pricing data available")
 	} else {
-		log.Printf("Skipping pricing cache initialization (SKIP_PRICING_CACHE_INIT=true)")
-		log.Printf("API server will not be ready until pricing data is loaded on first request")
+		log.Printf("Skipping cache initialization (SKIP_PRICING_CACHE_INIT=true)")
+		log.Printf("API server will not be ready until data is loaded on first request")
 	}
 
 	// Initialize InfluxDB client if enabled
@@ -448,6 +455,15 @@ func (s *APIServer) getSelectorForRegion(ctx context.Context, region string) (*s
 		regionSelector.SetLogger(log.Default())
 	} else {
 		regionSelector.SetLogger(log.New(io.Discard, "", 0))
+	}
+
+	// Initialize caches for this region if caching is enabled and not skipped
+	if s.cacheTTL > 0 && !s.skipCacheInit {
+		log.Printf("Initializing caches for region: %s", region)
+		if err := initializeCachesForSelector(ctx, regionSelector, s.cacheTTL); err != nil {
+			log.Printf("Warning: failed to initialize caches for region %s: %v", region, err)
+			// Don't fail the request, just log the warning
+		}
 	}
 
 	// Cache the selector
@@ -1360,13 +1376,29 @@ func ensureCacheDir(cacheDir string) (string, error) {
 	return expandedPath, nil
 }
 
-func initializePricingCaches(ctx context.Context, instanceSelector *selector.Selector, ttl time.Duration) error {
+func initializeCachesForSelector(ctx context.Context, instanceSelector *selector.Selector, ttl time.Duration) error {
 	if ttl <= 0 {
 		log.Printf("Pricing cache disabled (TTL = 0), skipping cache initialization")
 		return nil
 	}
 
-	log.Printf("Initializing pricing caches...")
+	log.Printf("Initializing caches...")
+
+	// Check and refresh instance types cache
+	instanceTypesCount := instanceSelector.InstanceTypesProvider.CacheCount()
+	log.Printf("Current cache counts - Instance Types: %d", instanceTypesCount)
+
+	if instanceTypesCount == 0 {
+		log.Printf("Instance types cache is empty, refreshing...")
+		// Fetch all instance types by passing nil
+		instanceTypes, err := instanceSelector.InstanceTypesProvider.Get(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("failed to refresh instance types cache: %w", err)
+		}
+		log.Printf("Instance types cache refreshed successfully (%d types loaded)", len(instanceTypes))
+	} else {
+		log.Printf("Instance types cache already populated (%d entries)", instanceTypesCount)
+	}
 
 	// Check and refresh on-demand pricing cache
 	onDemandCount := instanceSelector.EC2Pricing.OnDemandCacheCount()
@@ -1397,9 +1429,10 @@ func initializePricingCaches(ctx context.Context, instanceSelector *selector.Sel
 	}
 
 	// Log final cache counts
+	finalInstanceTypesCount := instanceSelector.InstanceTypesProvider.CacheCount()
 	finalOnDemandCount := instanceSelector.EC2Pricing.OnDemandCacheCount()
 	finalSpotCount := instanceSelector.EC2Pricing.SpotCacheCount()
-	log.Printf("Final cache counts - OnDemand: %d, Spot: %d", finalOnDemandCount, finalSpotCount)
+	log.Printf("Final cache counts - Instance Types: %d, OnDemand: %d, Spot: %d", finalInstanceTypesCount, finalOnDemandCount, finalSpotCount)
 
 	return nil
 }
