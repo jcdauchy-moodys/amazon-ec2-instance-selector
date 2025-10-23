@@ -9,8 +9,9 @@ A REST API server built on top of the Amazon EC2 Instance Selector library that 
 - **Query parameter support** for GET requests
 - **JSON body support** for POST requests
 - **AWS SDK integration** with automatic credential discovery
+- **Intelligent caching** - In-memory cache for filter results with configurable TTL
 - **CORS support** for web applications
-- **Health check endpoint**
+- **Health check endpoint** and readiness probes
 
 ## Quick Start
 
@@ -663,6 +664,7 @@ The API server can be configured using environment variables:
 | `PORT` | `8080` | Server port |
 | `EC2_INSTANCE_SELECTOR_CACHE_TTL` | `24h` | Cache time-to-live for pricing data. Examples: `1h`, `30m`, `24h`, `0` (disables cache) |
 | `EC2_INSTANCE_SELECTOR_CACHE_DIR` | `~/.ec2-instance-selector/` | Directory for cache files |
+| `EC2_INSTANCE_SELECTOR_FILTER_CACHE_TTL` | `5m` | Cache time-to-live for filter results. Caches API responses based on input parameters and region. Examples: `1m`, `5m`, `1h`, `0` (disables filter cache) |
 | `EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT` | `false` | Skip pricing cache initialization on startup for faster startup |
 | `EC2_INSTANCE_SELECTOR_VERBOSE` | `false` | Enable verbose/debug logging to see detailed AWS API calls and timing |
 
@@ -706,6 +708,65 @@ export EC2_INSTANCE_SELECTOR_CACHE_TTL=0
 - **Subsequent startups** are fast since pricing data is cached
 - **OndemandPricePerHour** and **SpotPrice** fields will only be populated when pricing cache is enabled and initialized
 - **Spot prices** are 30-day averages across availability zones
+
+### Filter Results Cache
+
+The API server includes an in-memory cache for filter results to improve performance for repeated queries with the same parameters.
+
+**How it works:**
+- Each unique combination of filter parameters + region gets cached
+- Cache key is generated from a SHA256 hash of the filter parameters and region
+- Cache automatically expires after the configured TTL
+- Sorting (`sort_by`, `sort_direction`) and limiting (`max_results`) are applied after cache lookup, allowing the same cached data to be reused with different presentation options
+- Expired entries are automatically cleaned up in the background
+
+**Benefits:**
+- **Faster response times** for repeated queries (typically 1-5ms vs 100-500ms)
+- **Reduced AWS API calls** for identical filter requests
+- **Lower costs** by minimizing AWS API usage
+- **Better scalability** for high-traffic scenarios
+
+**Configuration Examples:**
+
+```bash
+# Default: 5-minute cache for filter results
+export AWS_REGION=us-east-1
+export EC2_INSTANCE_SELECTOR_FILTER_CACHE_TTL=5m
+./ec2-api-server
+```
+
+```bash
+# Extended cache for less frequently changing data
+export AWS_REGION=us-east-1
+export EC2_INSTANCE_SELECTOR_FILTER_CACHE_TTL=1h
+./ec2-api-server
+```
+
+```bash
+# Shorter cache for more up-to-date results
+export AWS_REGION=us-east-1
+export EC2_INSTANCE_SELECTOR_FILTER_CACHE_TTL=1m
+./ec2-api-server
+```
+
+```bash
+# Disable filter cache (always query AWS)
+export AWS_REGION=us-east-1
+export EC2_INSTANCE_SELECTOR_FILTER_CACHE_TTL=0
+./ec2-api-server
+```
+
+**Cache Behavior:**
+- **Cache HIT**: Logged as `Cache HIT for region us-east-1 (key: abc123...)`
+- **Cache MISS**: Logged as `Cache MISS for region us-east-1 (key: abc123...)` followed by AWS API query
+- Cache size and key information are logged when entries are stored
+- Works for both GET (`/api/v1/instances`) and POST (`/api/v1/instances/filter`) endpoints
+
+**Important Notes:**
+- Cache is **in-memory only** and does not persist across server restarts
+- Different regions maintain separate cache entries
+- The cache is **thread-safe** and suitable for high-concurrency scenarios
+- Metrics recording still occurs for cached results
 
 ### Verbose Logging
 

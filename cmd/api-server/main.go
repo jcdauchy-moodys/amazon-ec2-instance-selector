@@ -9,6 +9,9 @@
 //	EC2_INSTANCE_SELECTOR_CACHE_DIR - Directory for cache files (default: ~/.ec2-instance-selector/)
 //	EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT - Skip pricing cache initialization on startup (default: false)
 //	                                   Set to "true" for faster startup without pricing data
+//	EC2_INSTANCE_SELECTOR_FILTER_CACHE_TTL - Cache time-to-live for filter results (default: 5m)
+//	                                   Caches the results of filter queries based on input parameters + region
+//	                                   Examples: "1m", "5m", "1h", "0" (disables filter cache)
 //	EC2_INSTANCE_SELECTOR_VERBOSE   - Enable verbose/debug logging (default: false)
 //	                                   Set to "true" to see detailed AWS API calls and timing information
 //	PORT                            - Server port (default: 8080)
@@ -45,6 +48,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -75,12 +79,100 @@ type APIServerConfig struct {
 	SkipPricingCacheInit bool
 	Verbose              bool
 	InfluxDB             metrics.InfluxDBConfig
+	FilterCacheTTL       time.Duration
+}
+
+// FilterCacheEntry represents a cached filter result
+type FilterCacheEntry struct {
+	Results    []*instancetypes.Details
+	Expiration time.Time
+}
+
+// FilterResultsCache is a thread-safe cache for filter results
+type FilterResultsCache struct {
+	entries map[string]*FilterCacheEntry
+	mu      sync.RWMutex
+	ttl     time.Duration
+}
+
+// NewFilterResultsCache creates a new filter results cache
+func NewFilterResultsCache(ttl time.Duration) *FilterResultsCache {
+	cache := &FilterResultsCache{
+		entries: make(map[string]*FilterCacheEntry),
+		ttl:     ttl,
+	}
+	// Start cleanup goroutine
+	if ttl > 0 {
+		go cache.cleanupExpired()
+	}
+	return cache
+}
+
+// Get retrieves a cached result if it exists and hasn't expired
+func (c *FilterResultsCache) Get(key string) ([]*instancetypes.Details, bool) {
+	if c.ttl <= 0 {
+		return nil, false
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	entry, exists := c.entries[key]
+	if !exists {
+		return nil, false
+	}
+
+	if time.Now().After(entry.Expiration) {
+		return nil, false
+	}
+
+	return entry.Results, true
+}
+
+// Set stores a result in the cache
+func (c *FilterResultsCache) Set(key string, results []*instancetypes.Details) {
+	if c.ttl <= 0 {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.entries[key] = &FilterCacheEntry{
+		Results:    results,
+		Expiration: time.Now().Add(c.ttl),
+	}
+}
+
+// Count returns the number of cached entries
+func (c *FilterResultsCache) Count() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.entries)
+}
+
+// cleanupExpired removes expired entries periodically
+func (c *FilterResultsCache) cleanupExpired() {
+	ticker := time.NewTicker(c.ttl)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		c.mu.Lock()
+		now := time.Now()
+		for key, entry := range c.entries {
+			if now.After(entry.Expiration) {
+				delete(c.entries, key)
+			}
+		}
+		c.mu.Unlock()
+	}
 }
 
 type APIServer struct {
 	baseConfig    aws.Config
 	selector      *selector.Selector            // selector for the default region
 	selectors     map[string]*selector.Selector // cache of selectors per region
+	filterCache   *FilterResultsCache           // cache for filter results
 	metricsClient *metrics.InfluxDBClient
 	region        string // AWS region from config (default)
 	cacheTTL      time.Duration
@@ -126,6 +218,56 @@ type FilterRequest struct {
 	PricePerHourMax        *float64 `json:"price_per_hour_max,omitempty"`
 	SortBy                 *string  `json:"sort_by,omitempty"`
 	SortDirection          *string  `json:"sort_direction,omitempty"`
+}
+
+// generateCacheKey creates a consistent cache key from filter request and region
+func generateCacheKey(req FilterRequest, region string) string {
+	// Note: MaxResults, SortBy, and SortDirection don't affect the underlying filter results,
+	// only the presentation, so we exclude them from the cache key to allow cache reuse
+	cacheReq := FilterRequest{
+		VCPUs:                  req.VCPUs,
+		VCPUsMin:               req.VCPUsMin,
+		VCPUsMax:               req.VCPUsMax,
+		Memory:                 req.Memory,
+		MemoryMin:              req.MemoryMin,
+		MemoryMax:              req.MemoryMax,
+		MemoryPerCpuMin:        req.MemoryPerCpuMin,
+		MemoryPerCpuMax:        req.MemoryPerCpuMax,
+		VCpusToMemoryRatio:     req.VCpusToMemoryRatio,
+		CPUArchitecture:        req.CPUArchitecture,
+		InstanceTypes:          req.InstanceTypes,
+		AllowList:              req.AllowList,
+		DenyList:               req.DenyList,
+		CurrentGeneration:      req.CurrentGeneration,
+		BareMetal:              req.BareMetal,
+		Burstable:              req.Burstable,
+		Region:                 &region, // Use the resolved region
+		AvailabilityZones:      req.AvailabilityZones,
+		UsageClass:             req.UsageClass,
+		GPUs:                   req.GPUs,
+		GPUsMin:                req.GPUsMin,
+		GPUsMax:                req.GPUsMax,
+		NetworkPerformance:     req.NetworkPerformance,
+		FreeTier:               req.FreeTier,
+		NVME:                   req.NVME,
+		NVMEInstanceStorageMin: req.NVMEInstanceStorageMin,
+		NVMEInstanceStorageMax: req.NVMEInstanceStorageMax,
+		NVMEInstanceStorage:    req.NVMEInstanceStorage,
+		PricePerHour:           req.PricePerHour,
+		PricePerHourMin:        req.PricePerHourMin,
+		PricePerHourMax:        req.PricePerHourMax,
+	}
+
+	// Marshal to JSON for consistent serialization
+	jsonBytes, err := json.Marshal(cacheReq)
+	if err != nil {
+		// If marshaling fails, return a unique key that won't match anything
+		return fmt.Sprintf("error-%d", time.Now().UnixNano())
+	}
+
+	// Generate SHA256 hash for compact key
+	hash := sha256.Sum256(jsonBytes)
+	return fmt.Sprintf("%x", hash)
 }
 
 type APIResponse struct {
@@ -202,10 +344,19 @@ func NewAPIServer(serverConfig APIServerConfig) (*APIServer, error) {
 		instanceSelector.SetLogger(log.New(io.Discard, "", 0))
 	}
 
+	// Initialize filter results cache
+	filterCache := NewFilterResultsCache(serverConfig.FilterCacheTTL)
+	if serverConfig.FilterCacheTTL > 0 {
+		log.Printf("Filter results cache enabled with TTL: %v", serverConfig.FilterCacheTTL)
+	} else {
+		log.Printf("Filter results cache disabled (TTL = 0)")
+	}
+
 	apiServer := &APIServer{
 		baseConfig:    cfg,
 		selector:      instanceSelector,
 		selectors:     make(map[string]*selector.Selector),
+		filterCache:   filterCache,
 		metricsClient: nil, // Will be set later if InfluxDB is enabled
 		region:        cfg.Region,
 		cacheTTL:      serverConfig.CacheTTL,
@@ -511,10 +662,6 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Execute the filter
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	// Determine which region to query
 	queryRegion := s.region
 	if filters.Region != nil {
@@ -523,6 +670,39 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Querying region %s (different from default region %s)", queryRegion, s.region)
 		}
 	}
+
+	// Check cache first
+	cacheKey := generateCacheKey(req, queryRegion)
+	if cachedResults, found := s.filterCache.Get(cacheKey); found {
+		log.Printf("Cache HIT for region %s (key: %s...)", queryRegion, cacheKey[:16])
+		instanceTypes := cachedResults
+
+		// Record metrics if enabled (even for cached results)
+		if s.metricsClient != nil {
+			if err := s.metricsClient.RecordInstanceTypes(instanceTypes, queryRegion); err != nil {
+				log.Printf("Warning: failed to record metrics: %v", err)
+			}
+		}
+
+		// Sort and limit results (these operations are not cached)
+		instanceTypes = s.applySortingAndLimits(instanceTypes, req)
+
+		response := APIResponse{
+			Success:       true,
+			InstanceTypes: instanceTypes,
+			Count:         len(instanceTypes),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	log.Printf("Cache MISS for region %s (key: %s...)", queryRegion, cacheKey[:16])
+
+	// Execute the filter
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Get the appropriate selector for the region
 	regionSelector, err := s.getSelectorForRegion(ctx, queryRegion)
@@ -544,6 +724,10 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 	filtersJSON, _ := filters.MarshalIndentOnlySetFilters("", "  ")
 	log.Printf("Filter executed in %v for region %s, found %d instances. Filters applied: %s", time.Since(start), queryRegion, len(instanceTypes), string(filtersJSON))
 
+	// Store in cache (before sorting/limiting)
+	s.filterCache.Set(cacheKey, instanceTypes)
+	log.Printf("Cached filter results for region %s (key: %s..., %d instances, cache size: %d)", queryRegion, cacheKey[:16], len(instanceTypes), s.filterCache.Count())
+
 	// Mark server as ready if this is the first successful query with pricing data
 	if !s.isReady() && (regionSelector.EC2Pricing.OnDemandCacheCount() > 0 || regionSelector.EC2Pricing.SpotCacheCount() > 0) {
 		s.setReady(true)
@@ -557,32 +741,8 @@ func (s *APIServer) filterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Sort results if sort_by is specified
-	if req.SortBy != nil && *req.SortBy != "" {
-		sortDirection := "ascending" // default
-		if req.SortDirection != nil && *req.SortDirection != "" {
-			sortDirection = *req.SortDirection
-		}
-
-		sortedInstanceTypes, err := sorter.Sort(instanceTypes, *req.SortBy, sortDirection)
-		if err != nil {
-			log.Printf("Failed to sort instance types: %v", err)
-			s.sendError(w, fmt.Sprintf("Failed to sort results: %v", err), http.StatusBadRequest)
-			return
-		}
-		instanceTypes = sortedInstanceTypes
-		log.Printf("Sorted %d instances by %s (%s)", len(instanceTypes), *req.SortBy, sortDirection)
-	}
-
-	// Limit results if max_results is specified
-	maxResults := 20 // default
-	if req.MaxResults != nil {
-		maxResults = *req.MaxResults
-	}
-
-	if len(instanceTypes) > maxResults {
-		instanceTypes = instanceTypes[:maxResults]
-	}
+	// Sort and limit results
+	instanceTypes = s.applySortingAndLimits(instanceTypes, req)
 
 	// Convert to response format
 	response := APIResponse{
@@ -612,10 +772,6 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Execute the filter
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	// Determine which region to query
 	queryRegion := s.region
 	if filters.Region != nil {
@@ -624,6 +780,39 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Querying region %s (different from default region %s)", queryRegion, s.region)
 		}
 	}
+
+	// Check cache first
+	cacheKey := generateCacheKey(req, queryRegion)
+	if cachedResults, found := s.filterCache.Get(cacheKey); found {
+		log.Printf("Cache HIT for region %s (key: %s...)", queryRegion, cacheKey[:16])
+		instanceTypes := cachedResults
+
+		// Record metrics if enabled (even for cached results)
+		if s.metricsClient != nil {
+			if err := s.metricsClient.RecordInstanceTypes(instanceTypes, queryRegion); err != nil {
+				log.Printf("Warning: failed to record metrics: %v", err)
+			}
+		}
+
+		// Sort and limit results (these operations are not cached)
+		instanceTypes = s.applySortingAndLimits(instanceTypes, req)
+
+		response := APIResponse{
+			Success:       true,
+			InstanceTypes: instanceTypes,
+			Count:         len(instanceTypes),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	log.Printf("Cache MISS for region %s (key: %s...)", queryRegion, cacheKey[:16])
+
+	// Execute the filter
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Get the appropriate selector for the region
 	regionSelector, err := s.getSelectorForRegion(ctx, queryRegion)
@@ -645,6 +834,10 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 	filtersJSON, _ := filters.MarshalIndentOnlySetFilters("", "  ")
 	log.Printf("Filter executed in %v for region %s, found %d instances. Filters applied: %s", time.Since(start), queryRegion, len(instanceTypes), string(filtersJSON))
 
+	// Store in cache (before sorting/limiting)
+	s.filterCache.Set(cacheKey, instanceTypes)
+	log.Printf("Cached filter results for region %s (key: %s..., %d instances, cache size: %d)", queryRegion, cacheKey[:16], len(instanceTypes), s.filterCache.Count())
+
 	// Mark server as ready if this is the first successful query with pricing data
 	if !s.isReady() && (regionSelector.EC2Pricing.OnDemandCacheCount() > 0 || regionSelector.EC2Pricing.SpotCacheCount() > 0) {
 		s.setReady(true)
@@ -658,6 +851,23 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Sort and limit results
+	instanceTypes = s.applySortingAndLimits(instanceTypes, req)
+
+	// Convert to response format
+	response := APIResponse{
+		Success:       true,
+		InstanceTypes: instanceTypes,
+		Count:         len(instanceTypes),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// applySortingAndLimits applies sorting and result limiting to instance types
+// These operations are not cached to allow different views of the same underlying data
+func (s *APIServer) applySortingAndLimits(instanceTypes []*instancetypes.Details, req FilterRequest) []*instancetypes.Details {
 	// Sort results if sort_by is specified
 	if req.SortBy != nil && *req.SortBy != "" {
 		sortDirection := "ascending" // default
@@ -668,8 +878,8 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 		sortedInstanceTypes, err := sorter.Sort(instanceTypes, *req.SortBy, sortDirection)
 		if err != nil {
 			log.Printf("Failed to sort instance types: %v", err)
-			s.sendError(w, fmt.Sprintf("Failed to sort results: %v", err), http.StatusBadRequest)
-			return
+			// Return unsorted results on error
+			return instanceTypes
 		}
 		instanceTypes = sortedInstanceTypes
 		log.Printf("Sorted %d instances by %s (%s)", len(instanceTypes), *req.SortBy, sortDirection)
@@ -685,15 +895,7 @@ func (s *APIServer) getHandler(w http.ResponseWriter, r *http.Request) {
 		instanceTypes = instanceTypes[:maxResults]
 	}
 
-	// Convert to response format
-	response := APIResponse{
-		Success:       true,
-		InstanceTypes: instanceTypes,
-		Count:         len(instanceTypes),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	return instanceTypes
 }
 
 func (s *APIServer) parseQueryParams(r *http.Request) FilterRequest {
@@ -1209,6 +1411,7 @@ func parseConfig() APIServerConfig {
 		Port:                 getEnvString("PORT", "8080"),
 		SkipPricingCacheInit: getEnvBool("EC2_INSTANCE_SELECTOR_SKIP_PRICING_CACHE_INIT", false),
 		Verbose:              getEnvBool("EC2_INSTANCE_SELECTOR_VERBOSE", false),
+		FilterCacheTTL:       getEnvDuration("EC2_INSTANCE_SELECTOR_FILTER_CACHE_TTL", 5*time.Minute),
 		InfluxDB: metrics.InfluxDBConfig{
 			Enabled:  getEnvBool("INFLUXDB_ENABLED", false),
 			URL:      getEnvString("INFLUXDB_URL", ""),
@@ -1225,6 +1428,7 @@ func main() {
 	log.Printf("Configuration:")
 	log.Printf("  Cache TTL: %v", config.CacheTTL)
 	log.Printf("  Cache Directory (raw): %s", config.CacheDir)
+	log.Printf("  Filter Cache TTL: %v", config.FilterCacheTTL)
 	log.Printf("  Port: %s", config.Port)
 	log.Printf("  Skip Pricing Cache Init: %t", config.SkipPricingCacheInit)
 	log.Printf("  Verbose Logging: %t", config.Verbose)
